@@ -1,0 +1,7 @@
+numpy
+scipy
+opencv-python
+matplotlib
+mediapipe
+torch
+imageio[pyav]

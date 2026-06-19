@@ -32,8 +32,9 @@ CHUNK_LEN  = 128   # PhysNet traite 128 frames à la fois
 STRIDE     = 64    # chevauchement 50% pour signal plus lisse
 
 WEIGHTS = {
-    'SCAMPS': os.path.join(ROOT, 'weights/SCAMPS_PhysNet_DiffNormalized.pth'),
-    'UBFC':   os.path.join(ROOT, 'weights/UBFC-rPPG_PhysNet_DiffNormalized.pth'),
+    'SCAMPS':   os.path.join(ROOT, 'weights/SCAMPS_PhysNet_DiffNormalized.pth'),
+    'UBFC':     os.path.join(ROOT, 'weights/UBFC-rPPG_PhysNet_DiffNormalized.pth'),
+    'AFRICA1':  os.path.join(ROOT, 'weights/finetune/physnet_africa1_best.pth'),
 }
 
 

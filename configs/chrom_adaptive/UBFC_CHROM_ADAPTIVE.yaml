@@ -1,0 +1,30 @@
+# Configuration entraînement / inférence pour CHROM adaptatif (UBFC-rPPG).
+#
+# Utilisation :
+#   python scripts/train_chrom_adaptive.py --config configs/chrom_adaptive/UBFC_CHROM_ADAPTIVE.yaml
+#   python scripts/compare_chrom.py --video ma_video.mp4 --config configs/chrom_adaptive/UBFC_CHROM_ADAPTIVE.yaml
+
+DATA:
+  # Dossier de sujets : .npy préprocessés (rPPG-Toolbox) ou rppg_rgb.csv (pipeline MediaPipe)
+  PATH: "chemin/vers/ubfc_preprocessed"
+  FORMAT: "npy"            # "npy" ou "csv"
+  FS: 30
+
+TRAIN:
+  EPOCHS: 100
+  LR: 0.01
+  # true  = Pearson loss vs signal BVP complet (label.npy)
+  # false = HR FFT loss vs HR de référence (oxymètre, hr_reference.txt)
+  USE_LABEL_SIGNAL: true
+
+MODEL:
+  # Dossier où sont écrits/lus les checkpoints CHROM adaptatif.
+  # Par phototype : chrom_adaptive_skin{1..6}.pth
+  # Par défaut    : chrom_adaptive.pth
+  SAVE_DIR: "weights/"
+
+  # Phototype (échelle de Fitzpatrick, 1-6) du sujet de la vidéo à analyser.
+  # Si un checkpoint chrom_adaptive_skin{SKIN_TYPE}.pth existe dans SAVE_DIR,
+  # compare_chrom.py et l'inférence l'utilisent automatiquement. Sinon,
+  # repli sur chrom_adaptive.pth, puis sur les coefficients De Haan.
+  SKIN_TYPE: 4

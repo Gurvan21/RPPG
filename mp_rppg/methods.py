@@ -57,6 +57,55 @@ def chrom(rgb, fs):
     return S
 
 
+def chrom_adaptive(rgb, fs, coeffs=None):
+    """
+    CHROM avec coefficients de combinaison appris (voir models/chrom_adaptive.py).
+
+    Même fenêtrage glissant que chrom(), mais Xs/Ys sont calculés avec
+    a1..a5 au lieu des constantes [3, 2, 1.5, 1, 1.5] de De Haan.
+
+    Args:
+        rgb    : (T, 3) float — signal RGB moyen par frame
+        fs     : fréquence d'échantillonnage (FPS)
+        coeffs : dict {'a1','a2','a3','a4','a5'} ; si None, valeurs De Haan
+
+    Returns:
+        bvp : (N,) signal BVP normalisé
+    """
+    if coeffs is None:
+        coeffs = {'a1': 3.0, 'a2': 2.0, 'a3': 1.5, 'a4': 1.0, 'a5': 1.5}
+    a1, a2, a3, a4, a5 = (coeffs['a1'], coeffs['a2'], coeffs['a3'],
+                          coeffs['a4'], coeffs['a5'])
+
+    FN = len(rgb)
+    Nyq = fs / 2
+    B, A = signal.butter(3, [0.7 / Nyq, 2.5 / Nyq], 'bandpass')
+
+    WinL = math.ceil(1.6 * fs)
+    if WinL % 2:
+        WinL += 1
+    NWin = math.floor((FN - WinL // 2) / (WinL // 2))
+    total = (WinL // 2) * (NWin + 1)
+    S = np.zeros(total)
+    WinS, WinM, WinE = 0, WinL // 2, WinL
+
+    for _ in range(NWin):
+        base = np.mean(rgb[WinS:WinE], axis=0)
+        Rn = rgb[WinS:WinE] / (base + 1e-8)
+        Xs = a1 * Rn[:, 0] - a2 * Rn[:, 1]
+        Ys = a3 * Rn[:, 0] + a4 * Rn[:, 1] - a5 * Rn[:, 2]
+        Xf = signal.filtfilt(B, A, Xs)
+        Yf = signal.filtfilt(B, A, Ys)
+        alpha = np.std(Xf) / (np.std(Yf) + 1e-8)
+        SWin = (Xf - alpha * Yf) * signal.windows.hann(WinL)
+        S[WinS:WinM] += SWin[:WinL // 2]
+        S[WinM:WinE]  = SWin[WinL // 2:]
+        WinS = WinM
+        WinM = WinS + WinL // 2
+        WinE = WinS + WinL
+    return S
+
+
 def pos(rgb, fs):
     """
     POS — Wang et al., IEEE TBME 2017.

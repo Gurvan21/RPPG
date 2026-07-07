@@ -24,6 +24,36 @@ def hr_from_fft(bvp, fs, low=0.7, high=2.5):
     return float(f[mask][np.argmax(pxx[mask])] * 60)
 
 
+def hr_candidates(bvp, fs, low=0.7, high=2.5, ratio=0.6, min_sep_bpm=4.0):
+    """Détecte l'AMBIGUÏTÉ : deux rythmes candidats dont les pics spectraux se
+    valent presque. Même estimateur que hr_from_fft (periodogram boxcar+zeropad).
+
+    Retourne (candidats, ambigu) où candidats = liste [(hr_bpm, puissance_rel)]
+    triée par puissance décroissante, et ambigu=True si le 2e pic (maximum LOCAL,
+    séparé de >min_sep_bpm, NON-harmonique) atteint >= `ratio` fois le 1er.
+    """
+    from scipy.signal import find_peaks
+    N = _next_pow2(len(bvp))
+    f, pxx = periodogram(bvp, fs=fs, nfft=N, detrend=False)
+    mask = (f >= low) & (f <= high)
+    fb, pb = f[mask] * 60.0, pxx[mask]
+    if pb.max() <= 0:
+        return [(float(fb[np.argmax(pb)]), 1.0)], False
+    loc, _ = find_peaks(pb)                       # maxima LOCAUX (vrais pics)
+    if len(loc) == 0:
+        loc = np.array([int(np.argmax(pb))])
+    loc = loc[np.argsort(pb[loc])[::-1]]          # triés par hauteur
+    top = pb[loc[0]]
+    cands = [(float(fb[i]), float(pb[i] / top)) for i in loc[:3]]
+    ambiguous = False
+    if len(cands) >= 2:
+        (h1, _), (h2, r2) = cands[0], cands[1]
+        harm = h2 > 0 and (abs(h1 / h2 - 2) < 0.15 or abs(h2 / h1 - 2) < 0.15)
+        if r2 >= ratio and abs(h1 - h2) > min_sep_bpm and not harm:
+            ambiguous = True
+    return cands, ambiguous
+
+
 def snr(bvp, hr_gt_bpm, fs, low=0.7, high=2.5):
     """
     SNR (dB) : puissance aux harmoniques 1+2 du HR vrai

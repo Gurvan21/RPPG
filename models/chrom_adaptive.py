@@ -52,6 +52,72 @@ class CHROMAdaptatif(nn.Module):
         }
 
 
+def compute_ita(rgb_mean):
+    """
+    Individual Typology Angle (ITA) — métrique dermatologique continue de
+    carnation, calculée depuis L*a*b*. Plus robuste/continue que les 6
+    catégories Fitzpatrick (qui ne sont qu'une discrétisation grossière
+    d'un trait continu).
+
+    Args:
+        rgb_mean : (3,) RGB moyen (échelle 0-255) sur la peau du sujet
+                   (ex: moyenne temporelle du signal RGB extrait).
+
+    Returns:
+        ITA en degrés (~+90° = très clair, ~-30° et moins = très foncé).
+    """
+    import cv2
+    rgb_u8 = np.clip(rgb_mean, 0, 255).astype(np.uint8).reshape(1, 1, 3)
+    lab = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2LAB).astype(np.float32).reshape(3)
+    L = lab[0] * 100.0 / 255.0       # cv2 encode L* sur [0,255] -> [0,100]
+    b = lab[2] - 128.0               # cv2 encode b* sur [0,255] avec offset 128
+    return float(np.degrees(np.arctan2(L - 50.0, b)))
+
+
+class CHROMAdaptiveConditioned(nn.Module):
+    """
+    CHROM dont les 5 coefficients sont produits par un petit MLP conditionné
+    sur un descripteur continu de carnation (ITA), plutôt que fixes (De Haan)
+    ou choisis dans un jeu discret par catégorie Fitzpatrick.
+
+    Initialisé pour reproduire exactement De Haan quel que soit l'ITA au
+    démarrage (poids de la dernière couche à 0, biais = coefficients De Haan)
+    — l'entraînement n'apprend que l'écart utile en fonction de la carnation.
+    """
+
+    def __init__(self, hidden=8):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(1, hidden),
+            nn.Tanh(),
+            nn.Linear(hidden, 5),
+        )
+        with torch.no_grad():
+            self.mlp[-1].weight.zero_()
+            self.mlp[-1].bias.copy_(torch.tensor(
+                [DEHAAN_COEFFICIENTS[k] for k in ('a1', 'a2', 'a3', 'a4', 'a5')]
+            ))
+
+    def _coeffs(self, ita):
+        ita_norm = (float(ita) if not torch.is_tensor(ita) else ita.item()) / 90.0
+        out = self.mlp(torch.tensor([[ita_norm]], dtype=torch.float32)).squeeze(0)
+        return out  # (5,) tensor : a1..a5
+
+    def forward(self, Rn, Gn, Bn, ita):
+        """ita : scalaire (ITA en degrés, voir compute_ita)."""
+        a1, a2, a3, a4, a5 = self._coeffs(ita)
+        Xs = a1 * Rn - a2 * Gn
+        Ys = a3 * Rn + a4 * Gn - a5 * Bn
+        alpha = Xs.std() / (Ys.std() + 1e-8)
+        return Xs - alpha * Ys
+
+    def get_coefficients(self, ita):
+        with torch.no_grad():
+            a1, a2, a3, a4, a5 = self._coeffs(ita)
+        return {'a1': a1.item(), 'a2': a2.item(), 'a3': a3.item(),
+                'a4': a4.item(), 'a5': a5.item()}
+
+
 def _checkpoint_path_for_skin_type(model_path, skin_type):
     """
     Si model_path est un dossier, cherche un checkpoint spécifique au

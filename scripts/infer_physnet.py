@@ -23,11 +23,10 @@ import torch
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from models.physnet import PhysNet_padding_Encoder_Decoder_MAX
+from scripts.preextract_clips import skin_neutralize, track_face_bboxes
 
 # ── Paramètres ─────────────────────────────────────────────────────────────────
-HAAR_XML   = os.path.join(ROOT, "assets/haarcascade_frontalface_default.xml")
 RESIZE     = 72
-BOX_COEF   = 1.5
 CHUNK_LEN  = 128   # PhysNet traite 128 frames à la fois
 STRIDE     = 64    # chevauchement 50% pour signal plus lisse
 
@@ -63,37 +62,17 @@ def read_video(path):
         return np.asarray(frames, dtype=np.uint8), float(fps)
 
 
-# ── Détection et crop visage (Haar Cascade) ────────────────────────────────────
+# ── Détection et crop visage (MediaPipe FaceMesh, suivi par frame) ─────────────
 def detect_and_crop(frames):
-    if not os.path.exists(HAAR_XML):
-        print("  Haar XML introuvable — frame entière utilisée")
-        h, w = frames[0].shape[:2]
-        bbox = (0, 0, w, h)
-    else:
-        detector = cv2.CascadeClassifier(HAAR_XML)
-        bbox = None
-        for frame in frames:
-            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-            zones = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
-            if len(zones):
-                x, y, w, h = zones[np.argmax(zones[:, 2])]
-                cx, cy = x + w // 2, y + h // 2
-                hw = int(w * BOX_COEF / 2)
-                hh = int(h * BOX_COEF / 2)
-                H, W = frame.shape[:2]
-                bbox = (max(0, cx-hw), max(0, cy-hh),
-                        min(W, cx+hw), min(H, cy+hh))
-                break
-        if bbox is None:
-            h, w = frames[0].shape[:2]
-            bbox = (0, 0, w, h)
-
-    x1, y1, x2, y2 = bbox
-    print(f"  Boîte visage HC : [{x1},{y1}]→[{x2},{y2}]")
+    """Bbox par frame via track_face_bboxes (suit le mouvement de tête,
+    voir scripts/preextract_clips.py::track_face_bboxes)."""
+    bboxes = track_face_bboxes(frames)
+    x1, y1, x2, y2 = bboxes[0]
+    print(f"  Boîte visage MediaPipe (frame 0) : [{x1},{y1}]→[{x2},{y2}]")
 
     cropped = []
-    for frame in frames:
-        roi = cv2.resize(frame[y1:y2, x1:x2], (RESIZE, RESIZE),
+    for frame, (x1, y1, x2, y2) in zip(frames, bboxes):
+        roi = cv2.resize(skin_neutralize(frame[y1:y2, x1:x2]), (RESIZE, RESIZE),
                          interpolation=cv2.INTER_AREA).astype(np.float32)
         cropped.append(roi)
     return np.asarray(cropped)   # (T, 72, 72, 3)
@@ -239,7 +218,7 @@ def main():
     print(f"  {len(frames)} frames @ {fps:.1f} FPS  ({len(frames)/fps:.1f}s)")
 
     # 2. Crop visage
-    print("[2/5] Détection et crop visage (HC)...")
+    print("[2/5] Détection et crop visage (MediaPipe)...")
     cropped = detect_and_crop(frames)     # (T, 72, 72, 3)
 
     # 3. DiffNormalized

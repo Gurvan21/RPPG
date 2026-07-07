@@ -3,7 +3,9 @@
 Fine-tuning PhysNet sur VitalVideos-Africa-1 (400 samples).
 
 Stratégie :
-  - Poids initiaux : SCAMPS (plus généraux qu'UBFC)
+  - Poids initiaux : configurables via --base-weights (SCAMPS, UBFC, PURE, MA-UBFC, BP4D) —
+    voir la comparaison à froid des 5 dans la mémoire projet (PURE généralise le mieux
+    sur l'échantillon DataVital testé)
   - Loss : corrélation de Pearson négative (standard rPPG)
   - Mixed precision (fp16) + gradient accumulation → VRAM ~1.5 GB (940MX OK)
   - Augmentations temporelles et photométriques pour la robustesse carnation
@@ -28,6 +30,10 @@ import random
 import time
 from pathlib import Path
 
+# MaxPool3d n'est pas encore implémenté nativement sur MPS (torch 2.8) — doit être
+# positionné AVANT `import torch` (lu une seule fois à l'init du backend MPS).
+os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -38,7 +44,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from models.physnet import PhysNet_padding_Encoder_Decoder_MAX
 
-WEIGHTS_SCAMPS = os.path.join(ROOT, 'weights/SCAMPS_PhysNet_DiffNormalized.pth')
+BASE_WEIGHTS = {
+    'SCAMPS':  os.path.join(ROOT, 'weights/SCAMPS_PhysNet_DiffNormalized.pth'),
+    'UBFC':    os.path.join(ROOT, 'weights/UBFC-rPPG_PhysNet_DiffNormalized.pth'),
+    'PURE':    os.path.join(ROOT, 'weights/PURE_PhysNet_DiffNormalized.pth'),
+    'MA-UBFC': os.path.join(ROOT, 'weights/MA-UBFC_physnet.pth'),
+    'BP4D':    os.path.join(ROOT, 'weights/BP4D_PseudoLabel_PhysNet_DiffNormalized.pth'),
+}
 CLIP_LEN = 128
 
 
@@ -75,15 +87,16 @@ class Africa1Dataset(Dataset):
             self.clips.extend(npz_files)
         print(f"  Dataset : {len(self.clips)} clips issus de {len(dirs)} sujets")
 
-    def _augment(self, x: np.ndarray) -> np.ndarray:
-        # x : (128, 72, 72, 3) DiffNormalized float32
+    def _augment(self, x: np.ndarray, y: np.ndarray):
+        # x : (128, 72, 72, 3) DiffNormalized float32 ; y : (128,)
         if random.random() < 0.5:
             x = x[::-1].copy()                          # flip temporel
+            y = y[::-1].copy()                          # ← y DOIT être inversé aussi (alignement)
         if random.random() < 0.5:
-            x = x[:, :, ::-1].copy()                    # flip horizontal
+            x = x[:, :, ::-1].copy()                    # flip horizontal (n'affecte pas y)
         if random.random() < 0.5:
-            x = x * random.uniform(0.85, 1.15)          # scaling amplitude
-        return x
+            x = x * random.uniform(0.85, 1.15)          # scaling amplitude (y z-scoré inchangé)
+        return x, y
 
     def __len__(self):
         return len(self.clips)
@@ -94,7 +107,7 @@ class Africa1Dataset(Dataset):
         y = data['y'].astype(np.float32)   # (128,)
 
         if self.augment:
-            x = self._augment(x)
+            x, y = self._augment(x, y)
 
         # (128, 72, 72, 3) → (3, 128, 72, 72) NCDHW pour PhysNet
         x = torch.from_numpy(x).permute(3, 0, 1, 2)
@@ -103,14 +116,46 @@ class Africa1Dataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
+# Phase 1 optionnelle : recalibration des statistiques BatchNorm (style AdaBN)
+# ---------------------------------------------------------------------------
+def bn_recalibrate(model, loader, device, epochs=1):
+    """
+    Gèle tous les poids (gamma/beta inclus), réinitialise les running mean/var des
+    BatchNorm3d puis les laisse se recalibrer sur la distribution cible (carnations
+    foncées) via de simples forward pass — aucun gradient, aucun risque de surapprentissage.
+    """
+    for p in model.parameters():
+        p.requires_grad = False
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm3d):
+            m.reset_running_stats()
+    model.train()
+    with torch.no_grad():
+        for _ in range(epochs):
+            for x, _ in loader:
+                x = x.to(device)
+                model(x)
+    print(f"  Phase BN-recal : statistiques recalibrées sur {len(loader.dataset)} clips ({epochs} passe(s))")
+
+
+# ---------------------------------------------------------------------------
 # Entraînement
 # ---------------------------------------------------------------------------
 def train(args):
-    device = torch.device('cuda' if torch.cuda.is_available() and not args.cpu else 'cpu')
+    if args.cpu:
+        device = torch.device('cpu')
+    elif torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')   # GPU Apple Silicon (M-series)
+    else:
+        device = torch.device('cpu')
     print(f"\nDevice : {device}")
     if device.type == 'cuda':
         print(f"GPU    : {torch.cuda.get_device_name(0)}")
         print(f"VRAM   : {torch.cuda.get_device_properties(0).total_memory // 1024**2} Mo")
+    elif device.type == 'mps':
+        print("GPU    : Apple Silicon (MPS, fallback CPU pour MaxPool3d)")
 
     # ── Trouver les sujets ───────────────────────────────────────────────
     data_root = Path(args.data_root)
@@ -128,7 +173,7 @@ def train(args):
     dirs_train = all_dirs[n_test + n_val:]
     print(f"Split  : {len(dirs_train)} train / {len(dirs_val)} val / {len(dirs_test)} test")
 
-    ds_train = Africa1Dataset(dirs_train, augment=True)
+    ds_train = Africa1Dataset(dirs_train, augment=not args.no_augment)
     ds_val   = Africa1Dataset(dirs_val,   augment=False)
     ds_test  = Africa1Dataset(dirs_test,  augment=False)
 
@@ -139,18 +184,45 @@ def train(args):
 
     # ── Modèle ──────────────────────────────────────────────────────────
     model = PhysNet_padding_Encoder_Decoder_MAX(frames=CLIP_LEN).to(device)
-    ckpt  = torch.load(WEIGHTS_SCAMPS, map_location=device)
-    model.load_state_dict(ckpt)
-    print(f"\nPoids SCAMPS chargés depuis {WEIGHTS_SCAMPS}")
+    if getattr(args, 'from_scratch', False):
+        print("\nInit ALÉATOIRE (from scratch) — aucun poids pré-entraîné chargé.")
+    else:
+        base_weights_path = BASE_WEIGHTS[args.base_weights]
+        model.load_state_dict(torch.load(base_weights_path, map_location=device))
+        print(f"\nPoids {args.base_weights} chargés depuis {base_weights_path}")
 
-    # Fine-tuning : dégeler toutes les couches (ou juste les dernières)
+    if args.bn_recal_epochs > 0:
+        print(f"\nPhase 1 — recalibration BN ({args.bn_recal_epochs} passe(s))…")
+        bn_recalibrate(model, loader_train, device, epochs=args.bn_recal_epochs)
+
+    # Fine-tuning : dégeler toutes les couches (ou geler le cœur temporel)
+    # (la phase BN-recal ci-dessus gèle tout — on repart d'un état "tout dégelé"
+    # avant d'appliquer la stratégie de gel de la phase 2)
+    for p in model.parameters():
+        p.requires_grad = True
     if args.freeze_backbone:
-        # Geler tout sauf les 2 derniers blocs + ConvBlock10
+        # Le décalage de domaine Africa-1 est un problème de réflectance/SNR couleur
+        # (carnations foncées), pas de dynamique temporelle du pouls. On gèle donc
+        # ConvBlock4-9 + upsample (forme d'onde, généralise bien depuis SCAMPS) et on
+        # entraîne ConvBlock1-3 (voient les pixels RGB bruts) + upsample2 + ConvBlock10
+        # (tête de sortie, réajuste l'échelle du signal).
+        FROZEN_PREFIXES = ('ConvBlock4', 'ConvBlock5', 'ConvBlock6', 'ConvBlock7',
+                           'ConvBlock8', 'ConvBlock9', 'upsample.')
         for name, p in model.named_parameters():
-            if not any(k in name for k in ('ConvBlock9', 'ConvBlock10', 'upsample2', 'poolspa')):
+            if name.startswith(FROZEN_PREFIXES):
                 p.requires_grad = False
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"Mode backbone gelé — {trainable:,} paramètres entraînables")
+        print(f"Mode gel cœur temporel — couches couleur (1-3) + tête (upsample2/10) entraînables — {trainable:,} paramètres")
+    elif args.freeze_bottleneck:
+        # Gel léger : seulement le bottleneck (ConvBlock8-9, juste avant le décodeur).
+        # Garde 71% des paramètres entraînables, contre 11% pour --freeze-backbone —
+        # teste un compromis entre capacité (A) et régularisation (B/C).
+        FROZEN_PREFIXES = ('ConvBlock8', 'ConvBlock9')
+        for name, p in model.named_parameters():
+            if name.startswith(FROZEN_PREFIXES):
+                p.requires_grad = False
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Mode gel bottleneck — ConvBlock8-9 gelés, reste entraînable — {trainable:,} paramètres")
     else:
         print(f"Fine-tuning complet — {sum(p.numel() for p in model.parameters()):,} paramètres")
 
@@ -231,16 +303,11 @@ def train(args):
     model.load_state_dict(torch.load(best_ckpt, map_location=device))
     model.eval()
 
-    from scipy.signal import periodogram
-    def hr_from_pred(pred_np, fps=30.0):
-        f, p = periodogram(pred_np, fs=fps, nfft=512, detrend=False)
-        mask = (f >= 0.7) & (f <= 2.5)
-        return float(f[mask][np.argmax(p[mask])] * 60)
+    from mp_rppg.metrics import hr_from_fft, snr, aggregate
 
-    def hr_from_gt(gt_np, fps=30.0):
-        return hr_from_pred(gt_np, fps)
+    fps = float(np.load(str(ds_test.clips[0]))['fps'])   # approx, identique pour tous les clips d'un sujet
 
-    errors = []
+    errors, snrs, pearsons = [], [], []
     loader_test = DataLoader(ds_test, batch_size=1, shuffle=False)
     with torch.no_grad():
         for x, y in loader_test:
@@ -249,17 +316,21 @@ def train(args):
                 pred, _, _, _ = model(x)
             p_np = pred.squeeze().cpu().numpy()
             g_np = y.squeeze().numpy()
-            fps  = ds_test.clips[0][2]   # fps from first clip (approx)
-            hr_p = hr_from_pred(p_np, fps)
-            hr_g = hr_from_gt(g_np, fps)
+            hr_g = hr_from_fft(g_np, fps)
+            hr_p = hr_from_fft(p_np, fps)
             errors.append(abs(hr_p - hr_g))
+            snrs.append(snr(p_np, hr_g, fps))
+            pearsons.append(float(np.corrcoef(p_np, g_np)[0, 1]))
 
-    mae = np.mean(errors)
-    rmse = np.sqrt(np.mean(np.array(errors) ** 2))
-    print(f"  MAE  : {mae:.2f} bpm")
-    print(f"  RMSE : {rmse:.2f} bpm")
+    metrics = aggregate(errors, snrs)
+    metrics['Pearson_mean'] = float(np.mean(pearsons))
+    print(f"  MAE     : {metrics['MAE']:.2f} bpm")
+    print(f"  RMSE    : {metrics['RMSE']:.2f} bpm")
+    print(f"  SNR     : {metrics['SNR_mean']:.2f} dB")
+    print(f"  Pearson : {metrics['Pearson_mean']:.3f}")
     print(f"\nPoids fine-tunés → {best_ckpt}")
     print("Ajoute ce chemin dans WEIGHTS de scripts/infer_physnet.py pour l'utiliser.")
+    return metrics
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +338,8 @@ def train(args):
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Fine-tuning PhysNet — VitalVideos-Africa-1")
+    parser.add_argument('--base-weights',    default='SCAMPS', choices=list(BASE_WEIGHTS.keys()),
+                        help="Poids PhysNet pré-entraînés à utiliser comme point de départ")
     parser.add_argument('--data-root',       default='Data/africa1',
                         help="Dossier racine des sujets Africa-1")
     parser.add_argument('--output',          default='weights/finetune',
@@ -284,7 +357,18 @@ if __name__ == '__main__':
                         help="Fraction sujets pour test final")
     parser.add_argument('--seed',            type=int,   default=42)
     parser.add_argument('--freeze-backbone', action='store_true',
-                        help="Geler le backbone, entraîner seulement les dernières couches")
+                        help="Geler le cœur temporel (ConvBlock4-9), entraîner les couches "
+                             "couleur précoces (1-3) + la tête de sortie")
+    parser.add_argument('--freeze-bottleneck', action='store_true',
+                        help="Geler seulement le bottleneck (ConvBlock8-9) — gel léger, "
+                             "71%% des paramètres restent entraînables")
+    parser.add_argument('--bn-recal-epochs', type=int, default=0,
+                        help="Phase 1 : nb de passes de recalibration BN-only avant le "
+                             "fine-tuning (0 = désactivé)")
+    parser.add_argument('--no-augment',      action='store_true',
+                        help="Désactive les augmentations train (diagnostic capacité/mémorisation)")
+    parser.add_argument('--from-scratch',    action='store_true',
+                        help="Init aléatoire (pas de poids pré-entraînés) — test from-scratch vs fine-tune")
     parser.add_argument('--cpu',             action='store_true')
     args = parser.parse_args()
 

@@ -17,6 +17,50 @@ import torch.nn as nn
 from torch.nn.modules.utils import _triple
 
 
+class SeparableMaxPool3d(nn.Module):
+    """
+    Remplacement de nn.MaxPool3d (kernel=stride=2, non chevauchant) par des
+    reshape+amax — opérations nativement supportées sur MPS (Apple GPU), alors
+    que MaxPool3d ne l'est pas (et tombe sinon en fallback CPU très lent).
+
+    Résultat numériquement IDENTIQUE à nn.MaxPool3d(k, stride=k, ceil_mode=False)
+    → les poids entraînés restent valides. Gère les dimensions impaires en
+    tronquant le reste (comportement floor de MaxPool3d).
+    """
+
+    def __init__(self, temporal=False):
+        super().__init__()
+        self.temporal = temporal   # True = pool aussi en temps (2,2,2), False = spatial seul (1,2,2)
+
+    def forward(self, x):                       # x : (B, C, T, H, W)
+        B, C, T, H, W = x.shape
+        if self.temporal:
+            T2 = T - (T % 2)
+            x = x[:, :, :T2].reshape(B, C, T2 // 2, 2, H, W).amax(dim=3)
+            T = T2 // 2
+        H2, W2 = H - (H % 2), W - (W % 2)
+        x = x[:, :, :, :H2, :W2].reshape(B, C, T, H2 // 2, 2, W2 // 2, 2)
+        return x.amax(dim=(4, 6))
+
+
+class SpatialAvgPool3d(nn.Module):
+    """
+    Remplace nn.AdaptiveAvgPool3d((frames,1,1)) quand la dim temporelle vaut
+    déjà `frames` (toujours le cas dans PhysNet après les upsample) : c'est
+    alors une simple moyenne spatiale globale (H,W) → MPS-natif, pas de fallback.
+    """
+
+    def __init__(self, frames):
+        super().__init__()
+        self.frames = frames
+        self._fallback = nn.AdaptiveAvgPool3d((frames, 1, 1))
+
+    def forward(self, x):                       # (B, C, T, H, W)
+        if x.shape[2] == self.frames:
+            return x.mean(dim=(3, 4), keepdim=True)
+        return self._fallback(x)                # cas générique (rare)
+
+
 class PhysNet_padding_Encoder_Decoder_MAX(nn.Module):
     def __init__(self, frames=128):
         super(PhysNet_padding_Encoder_Decoder_MAX, self).__init__()
@@ -84,11 +128,11 @@ class PhysNet_padding_Encoder_Decoder_MAX(nn.Module):
 
         self.ConvBlock10 = nn.Conv3d(64, 1, [1, 1, 1], stride=1, padding=0)
 
-        self.MaxpoolSpa = nn.MaxPool3d((1, 2, 2), stride=(1, 2, 2))
-        self.MaxpoolSpaTem = nn.MaxPool3d((2, 2, 2), stride=2)
+        self.MaxpoolSpa = SeparableMaxPool3d(temporal=False)     # ≡ MaxPool3d((1,2,2))
+        self.MaxpoolSpaTem = SeparableMaxPool3d(temporal=True)   # ≡ MaxPool3d((2,2,2))
 
         # self.poolspa = nn.AdaptiveMaxPool3d((frames,1,1))    # pool only spatial space
-        self.poolspa = nn.AdaptiveAvgPool3d((frames, 1, 1))
+        self.poolspa = SpatialAvgPool3d(frames)   # ≡ AdaptiveAvgPool3d((frames,1,1)), MPS-natif
 
     def forward(self, x):  # Batch_size*[3, T, 128,128]
         x_visual = x

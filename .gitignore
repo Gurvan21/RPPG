@@ -2,6 +2,32 @@ __pycache__/
 *.pyc
 .venv/
 venv*/
+
+# --- Vidéos (tous formats) ---
 *.avi
 *.mp4
+*.mov
+*.MOV
+*.m4v
+
+# --- Données SENSIBLES / personnelles (NE JAMAIS pousser) ---
+DataVital/
+datavital/
 data/
+Data/
+TestRésultats/
+*.pdf
+*.jpeg
+*.jpg
+*.png
+*.json
+*.npz
+
+# --- Poids modèles (lourds) ---
+weights/
+*.pth
+
+# --- Divers ---
+.DS_Store
+*.log
+results/

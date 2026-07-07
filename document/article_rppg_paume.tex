@@ -1,0 +1,682 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{authblk}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=blue,urlcolor=blue]{hyperref}
+
+% ---- À PERSONNALISER ----
+\newcommand{\Auteur}{Ronel Nkouathio}
+\newcommand{\Entreprise}{[Nom de l'entreprise d'accueil]}
+\newcommand{\Encadrant}{[Encadrant·e]}
+% -------------------------
+
+\title{\textbf{Mesure équitable de la fréquence cardiaque par caméra :\\
+étude comparative détaillée de méthodes rPPG sur peaux foncées,\\
+du fine-tuning de PhysNet aux signaux palmaires}}
+\author[1,2]{\Auteur\thanks{Stage réalisé au sein de \Entreprise{}. Correspondance : nkouathioronel@gmail.com}}
+\affil[1]{\Entreprise{} --- développement d'outils de santé numérique}
+\affil[2]{Stage d'ingénieur / de master, encadré par \Encadrant}
+\date{Juillet 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+La photopléthysmographie à distance (rPPG) estime la fréquence cardiaque (FC)
+depuis une simple vidéo. Ses performances se dégradent sur les carnations foncées
+(phototypes Fitzpatrick~5--6), la mélanine absorbant le faible signal optique du
+pouls --- un biais d'équité documenté, analogue à celui de l'oxymétrie de contact.
+Dans le cadre d'un stage industriel visant un déploiement en pharmacie sur
+smartphone, nous menons une étude comparative détaillée de méthodes rPPG sur le jeu
+de données académique VitalVideos (114~sujets, majoritairement Fitzpatrick~5--6,
+avec vérité-terrain PPG de contact). Nous décrivons formellement et évaluons : les
+méthodes de chrominance CHROM et POS ; une variante conditionnée au teint
+(CHROM-ITA) ; un réseau convolutif~1D sur signaux multi-régions ; et une stratégie
+de fine-tuning de PhysNet dont nous étudions les variantes. En évaluation held-out
+sans fuite, PhysNet affiné atteint une MAE de 3{,}89~bpm et le réseau~1D de
+4{,}69~bpm ; couplés à une politique d'abstention par qualité de signal, l'erreur
+sur les mesures acceptées tombe à 0{,}25 et 1{,}27~bpm. Nous montrons surtout que le
+visage échoue sur peau foncée et proposons de mesurer sur la \textbf{paume}, peau la
+moins pigmentée du corps ; un réseau~1D palmaire validé sans fuite, groupé par
+personne, atteint \textbf{0{,}69~bpm de MAE sans écart entre carnations}
+(Fitzpatrick~6 : 0{,}73 ; Fitzpatrick~5 : 0{,}70). Des essais préliminaires sur nos
+propres vidéos smartphone confirment un signal exploitable (1--2~bpm) en capture
+stable. Le code est publié en open source.
+
+\medskip
+\noindent\textbf{Mots-clés :} rPPG, fréquence cardiaque, équité, Fitzpatrick,
+PhysNet, fine-tuning, CNN~1D, paume, abstention, santé numérique.
+\end{abstract}
+
+\tableofcontents
+\medskip
+
+\section{Introduction}
+\label{sec:intro}
+
+\subsection{Principe physiologique}
+À chaque battement cardiaque, l'afflux de sang dans le lit capillaire cutané modifie
+légèrement l'absorption de la lumière par la peau. Une caméra observe donc, sur la
+peau éclairée, une infime variation périodique de couleur --- de l'ordre de $1\%$ de
+l'intensité, dominante dans le canal vert (l'hémoglobine absorbant fortement autour
+de 540~nm). Extraire cette composante et estimer sa fréquence donne la FC sans
+contact. Le phénomène a été mis en évidence par Verkruysse
+\emph{et al.}~\cite{verkruysse2008} puis automatisé par Poh \emph{et
+al.}~\cite{poh2010}. Deux familles de méthodes se sont imposées : les approches
+\emph{de chrominance} sans apprentissage --- CHROM~\cite{dehaan2013} et
+POS~\cite{wang2017} --- et les approches d'\emph{apprentissage profond} ---
+DeepPhys~\cite{chen2018}, PhysNet~\cite{yu2019}, RhythmNet~\cite{niu2020}.
+
+\subsection{Le problème d'équité}
+La quantité de \emph{mélanine} dans l'épiderme conditionne l'absorption lumineuse.
+Sur une peau foncée (phototypes Fitzpatrick~5--6), une plus grande part du signal est
+absorbée avant d'atteindre le lit capillaire, si bien que la modulation pulsatile
+mesurable est plus faible : le rapport signal-sur-bruit (SNR) chute. Nowara
+\emph{et al.}~\cite{nowara2020} le quantifient pour le rPPG. Ce biais est le pendant
+optique du biais racial de l'oxymétrie de contact, établi cliniquement par Sjoding
+\emph{et al.}~\cite{sjoding2020} : chez les patients à peau foncée, l'oxymètre
+surestime la saturation, avec des conséquences de prise en charge. Pour un
+déploiement en Afrique subsaharienne --- le cadre applicatif de ce stage --- où la
+population est très majoritairement de phototype~5--6, ce biais est rédhibitoire.
+
+\subsection{Contributions et plan}
+Ce document rend compte de l'ensemble du travail de stage, sans se limiter à une
+méthode. Nos contributions sont :
+\begin{enumerate}\itemsep2pt
+  \item une \textbf{description formelle et une comparaison rigoureuse} de cinq
+  méthodes rPPG sur VitalVideos, en évaluation held-out sans fuite
+  (Sections~\ref{sec:methodes}, \ref{sec:resultats}) ;
+  \item une \textbf{étude de fine-tuning de PhysNet} (initialisation, gel de couches,
+  entraînement de zéro) et ses enseignements (Section~\ref{sec:ft}) ;
+  \item la motivation et la conception d'un \textbf{réseau convolutif~1D sur signaux
+  régionaux}, léger et transférable (Section~\ref{sec:cnn1d}) ;
+  \item une \textbf{politique d'abstention} à quatre garde-fous, pour ne rendre
+  qu'une valeur fiable (Section~\ref{sec:abstention}) ;
+  \item notre contribution principale : mesurer sur la \textbf{paume}, avec un
+  réseau~1D palmaire validé sans fuite qui \emph{supprime l'écart d'équité}
+  (Section~\ref{sec:paume}) ;
+  \item des \textbf{tests préliminaires smartphone} et un \textbf{rapport honnête des
+  échecs} (Sections~\ref{sec:perso}, \ref{sec:negatifs}).
+\end{enumerate}
+
+\paragraph{Positionnement et humilité.} Ce travail est un travail de \emph{stage},
+exploratoire et industriel, non une étude clinique. Les résultats sont des preuves de
+concept. Nous privilégions la rigueur méthodologique (absence de fuite) et la
+transparence sur les limites et les échecs.
+
+\section{Cadres de travail}
+\label{sec:cadres}
+
+\paragraph{Cadre académique.} Les algorithmes de référence et les jeux de données
+publics forment le socle scientifique. Nous validons d'abord sur
+UBFC-rPPG~\cite{bobbia2019}, benchmark standard, puis principalement sur
+\textbf{VitalVideos}~\cite{toye2023}.
+
+\paragraph{Cadre industriel.} L'objectif est un outil utilisable en pharmacie, sur
+smartphone, par des non-spécialistes. Cela impose des contraintes absentes des
+benchmarks : compression H.264, réglages caméra variables, éclairage non contrôlé,
+et une population cible à peau foncée. Ces contraintes orientent nos choix (site
+palmaire, abstention, protocole de capture).
+
+\paragraph{Cadre open source.} Nous nous appuyons sur rPPG-Toolbox~\cite{liu2023}
+(implémentations de référence et poids pré-entraînés), MediaPipe~\cite{lugaresi2019}
+(détection visage/main) et un \emph{face parsing} BiSeNet~\cite{yu2018bisenet}. En
+retour, le code de nos pipelines et évaluations est publié en open source.
+
+\section{Données et prétraitement}
+\label{sec:donnees}
+
+\subsection{Le jeu de données VitalVideos}
+Chaque sujet de VitalVideos est filmé selon plusieurs \emph{scénarios} :
+\emph{faceonly} (visage seul), \emph{facepalm} (visage et paume dans le cadre),
+\emph{handheld} (caméra tenue en main), \emph{exertion} (après effort),
+\emph{slowbreath}/\emph{quickbreath} (respiration contrôlée). Pour chaque scénario, le
+JSON associé fournit : la vidéo RGB (résolution $\sim$$960\times1056$, 60~fps,
+encodage quasi sans perte), une PPG de contact synchronisée (oxymètre \emph{CMS50},
+colonnes temps/PPG/FC/SpO$_2$), une pression artérielle au brassard (Omron), un
+signal de pression respiratoire, et des métadonnées (âge, genre, phototype de
+Fitzpatrick, lieu, environnement). Cette richesse, et surtout la forte proportion de
+phototypes~5--6, en font un support rare pour l'étude de l'équité.
+
+\subsection{Alignement de la vérité-terrain}
+La FC de référence est dérivée de la PPG de contact : la colonne PPG est filtrée
+passe-bande à la fréquence native du capteur, puis interpolée sur les
+\emph{horodatages vidéo} (fournis image par image dans le JSON). Toutes les vidéos
+sont ramenées à 30~images/s. Ce rééchantillonnage est fait \emph{uniquement vers le
+bas} (décimation depuis 60~fps) : sur-échantillonner (p.\,ex. $24\to30$) dupliquerait
+des images et détruirait la représentation \emph{DiffNormalized} de PhysNet.
+
+\subsection{Deux représentations d'entrée}
+Selon la méthode, une vidéo est transformée en :
+
+\paragraph{(a) Clips normalisés (PhysNet).} Le visage est suivi et recadré, chaque
+image redimensionnée en $72\times72$, puis convertie en \emph{DiffNormalized} : la
+différence normalisée trame à trame
+\begin{equation}
+d(t) = \frac{I(t+1) - I(t)}{I(t+1) + I(t) + \epsilon},
+\end{equation}
+qui accentue la composante pulsatile et atténue l'éclairage stationnaire. Les clips
+font 128~images.
+
+\paragraph{(b) Signaux multi-régions (CHROM/POS/CNN~1D).} Pour chaque image, on
+calcule la couleur moyenne de régions cutanées. Pour le \emph{visage},
+$N_r = 23$~régions : six régions anatomiques (front, deux joues, nez, deux
+sous-yeux) délimitées par des points-clés MediaPipe FaceMesh, la peau complète, et
+une grille $4\times4$ (16~cellules) couvrant la boîte du visage, à la manière des
+cartes spatio-temporelles MSTmap~\cite{niu2020}. Un masque de peau produit par le
+\emph{face parsing} BiSeNet exclut cheveux, yeux et arrière-plan. Chaque région est
+moyennée dans \emph{trois espaces colorimétriques} --- RGB, YUV, Lab --- soit
+$N_c = 9$~canaux. On obtient un tenseur $x \in \mathbb{R}^{T \times N_r \times N_c}$
+($23\times9 = 207$~canaux pour le visage). Les images sans détection sont interpolées
+linéairement.
+
+\subsection{Filtrage et held-out}
+Tous les signaux estimés sont filtrés passe-bande dans $[0{,}7;2{,}5]$~Hz
+($\approx$$[42;150]$~bpm). Vingt-deux sujets ($\sim$54~scénarios) sont réservés au
+test et n'apparaissent jamais à l'entraînement (Section~\ref{sec:rigueur}).
+
+\section{Méthodes évaluées}
+\label{sec:methodes}
+
+\subsection{Normalisation temporelle}
+Toutes les méthodes de chrominance et le CNN~1D partent d'une normalisation
+temporelle par canal, qui retire la composante continue (teint, éclairage) et ne
+garde que les fluctuations relatives :
+\begin{equation}
+\tilde{x}_c(t) = \frac{x_c(t)}{\bar{x}_c} - 1, \qquad
+\bar{x}_c = \frac{1}{T}\sum_t x_c(t).
+\end{equation}
+
+\subsection{CHROM}
+CHROM~\cite{dehaan2013} construit deux signaux de chrominance à partir des canaux RGB
+normalisés :
+\begin{equation}
+X = 3\tilde{R} - 2\tilde{G}, \qquad Y = 1{,}5\tilde{R} + \tilde{G} - 1{,}5\tilde{B},
+\end{equation}
+puis combine $S = X - \alpha Y$ avec $\alpha = \sigma(X)/\sigma(Y)$, ce qui annule au
+premier ordre la composante de mouvement (spéculaire) sous l'hypothèse d'un teint
+standardisé. Aucun entraînement n'est requis.
+
+\subsection{POS}
+POS~\cite{wang2017} projette les RGB temporellement normalisés sur un plan orthogonal
+à la direction de l'intensité :
+\begin{equation}
+\begin{bmatrix} S_1 \\ S_2 \end{bmatrix} =
+\begin{bmatrix} 0 & 1 & -1 \\ -2 & 1 & 1 \end{bmatrix}
+\begin{bmatrix} \tilde{R} \\ \tilde{G} \\ \tilde{B} \end{bmatrix},
+\qquad S = S_1 + \frac{\sigma(S_1)}{\sigma(S_2)} S_2.
+\end{equation}
+POS est en général plus robuste que CHROM sur peaux claires ; nous vérifions son
+comportement sur peaux foncées.
+
+\subsection{CHROM conditionné au teint : CHROM-ITA}
+\label{sec:chromita}
+La projection de CHROM est optimale pour un teint \og{}moyen\fg{}. Nous conditionnons ses
+coefficients au teint via l'\emph{Individual Typology Angle} (ITA), descripteur
+colorimétrique standard en dermatologie :
+\begin{equation}
+\mathrm{ITA} = \arctan\!\left(\frac{L^* - 50}{b^*}\right)\cdot\frac{180}{\pi},
+\end{equation}
+où $(L^*, b^*)$ sont mesurés dans l'espace CIE-Lab sur la peau (ITA élevé $=$ peau
+claire, ITA fortement négatif $=$ peau foncée). Un petit perceptron
+$\phi_\theta : \mathrm{ITA} \mapsto (a_1,\dots,a_k)$ prédit les coefficients de la
+combinaison chrominance, permettant d'\emph{adapter} la projection à chaque
+carnation. Ce module est entraîné sur VitalVideos. Pour une estimation d'ITA robuste
+à l'éclairage, nous normalisons par la sclère (blanc de l'\oe{}il) comme référence
+d'illumination.
+
+\subsection{Signaux multi-régions et réseau convolutif~1D}
+\label{sec:cnn1d}
+
+\paragraph{Motivation.} PhysNet opère par convolutions 3D sur la vidéo brute :
+puissant mais coûteux (GPU, plein cadre) et sensible aux artefacts de compression.
+Nous proposons une voie plus légère : \emph{réduire la vidéo à un ensemble compact de
+signaux régionaux multi-colorimétriques} (Section~\ref{sec:donnees}), puis régresser
+le pouls par un réseau \textbf{convolutif~1D dilaté}. Trois motivations : (i)~\emph{
+coût} très réduit ($\sim$110\,000~paramètres, pas de convolution 3D), exécutable sur
+matériel modeste ; (ii)~\emph{robustesse} par la diversité spatiale (multi-régions,
+certaines mieux perfusées) et colorimétrique (RGB+YUV+Lab, l'illumination affectant
+différemment chaque espace) ; (iii)~\emph{transférabilité} : la même représentation
+s'applique directement à la \emph{paume}, pour laquelle il n'existe pas de modèle de
+segmentation dédié --- ce choix est le pont vers notre contribution principale
+(Section~\ref{sec:paume}). Conceptuellement, le CNN~1D est la version \emph{apprenable}
+du pipeline CHROM/POS multi-ROI : il apprend implicitement la pondération des régions,
+la projection chrominance et le filtrage temporel.
+
+\paragraph{Architecture.} L'entrée $x \in \mathbb{R}^{B\times C\times T}$ ($C = N_r
+N_c$) passe par : une \emph{tête d'entrée} $1\times1$ ($C \to 64$ canaux) avec
+BatchNorm et ReLU ; puis quatre \emph{blocs temporels résiduels} de dilatations
+$\{1,2,4,8\}$, chacun composé de deux convolutions 1D (noyau~3, canaux~64) avec
+BatchNorm, ReLU et Dropout~$0{,}1$, et connexion résiduelle ; enfin une \emph{tête de
+projection} $1\times1$ ($64 \to 1$). Les dilatations croissantes donnent un champ
+réceptif temporel d'environ 60~échantillons ($\sim$2~s à 30~fps) pour un coût
+paramétrique faible. La sortie est l'onde PPG estimée $\hat{y} \in \mathbb{R}^{B\times
+T}$.
+
+\paragraph{Perte.} L'apprentissage minimise la \emph{corrélation de Pearson négative}
+entre l'onde prédite et l'onde de référence, invariante à l'amplitude et au décalage :
+\begin{equation}
+\mathcal{L}(\hat{y}, y) = -\,
+\frac{\sum_t (\hat{y}_t - \bar{\hat y})(y_t - \bar y)}
+{\sqrt{\sum_t (\hat{y}_t - \bar{\hat y})^2}\,\sqrt{\sum_t (y_t - \bar y)^2} + \epsilon}.
+\end{equation}
+La FC est ensuite l'argument du pic dominant du périodogramme dans la bande
+cardiaque.
+
+\subsection{PhysNet et fine-tuning}
+\label{sec:physnet}
+PhysNet~\cite{yu2019} est un réseau encodeur-décodeur 3D (convolutions
+spatio-temporelles, \emph{max-pooling} temporel puis \emph{upsampling}) qui régresse
+l'onde PPG depuis les clips DiffNormalized. Des poids pré-entraînés existent (PURE,
+SCAMPS, UBFC). Le sujet central est l'\emph{adaptation} de ces poids à VitalVideos ;
+nous en faisons une étude dédiée (Section~\ref{sec:ft}).
+
+\subsection{Ballistocardiographie (rBCG)}
+En complément \emph{optique}, nous estimons la FC par le micro-mouvement de la tête
+induit par l'éjection sanguine~\cite{balakrishnan2013} : suivi de points rigides par
+flux optique de Lucas-Kanade, sélection des trajectoires stables, filtrage dans la
+bande cardiaque, décomposition en composantes principales (PCA/SVD), et choix de la
+composante la plus périodique (SNR maximal). Étant \emph{mécanique}, le rBCG est
+\emph{indépendant de la mélanine} --- atout sur peau foncée --- mais bruité et
+sensible au mouvement ; nous l'utilisons comme \emph{votant}, jamais comme mesure
+autonome.
+
+\subsection{Fusion adaptative et abstention}
+\label{sec:abstention}
+\paragraph{Fusion.} Les FC des différentes méthodes sont agrégées par une règle
+adaptative : \emph{médiane} si les méthodes s'accordent (faible écart-type),
+\emph{sélection au SNR} sinon, avec un garde-fou anti-harmonique pour éviter de
+choisir un $\times$2 fréquentiel.
+
+\paragraph{Quatre garde-fous.} Inspirés des systèmes commerciaux, nous ne rendons une
+valeur que si la mesure est jugée \emph{fiable}. Une mesure est \textsc{fiable} si :
+(i)~\emph{accord} --- l'écart-type des FC est faible ; (ii)~\emph{SNR} médian
+suffisant ; (iii)~\emph{couverture} --- une analyse de qualité par fenêtres
+glissantes (fenêtre 10~s, pas 2~s) juge chaque fenêtre et l'on agrège les fenêtres
+fiables, la fraction fiable donnant la couverture ; (iv)~\emph{absence d'ambiguïté}
+--- deux rythmes candidats de puissance spectrale comparable (le second $\geq 60\%$ du
+premier, séparés de plus de 4~bpm, non harmoniques) déclenchent un doute. Faute de
+quoi, la sortie est \og{}à confirmer\fg{} ou \og{}à refaire\fg{}. Les seuils exacts sont donnés en
+annexe~\ref{app:seuils}.
+
+\paragraph{Qualité de signal (SNR).} Le SNR aveugle mesure la concentration
+spectrale autour de la FC estimée et de sa première harmonique :
+\begin{equation}
+\mathrm{SNR} = 10\log_{10}
+\frac{\sum_{f \in \mathcal{B}(f_{HR})} P(f)}{\sum_{f \notin \mathcal{B}(f_{HR})} P(f)},
+\end{equation}
+où $\mathcal{B}$ est une bande étroite autour de $f_{HR}$ et $2f_{HR}$. C'est
+l'indicateur pivot de la politique d'abstention.
+
+\section{Étude de fine-tuning de PhysNet}
+\label{sec:ft}
+
+Partant d'un PhysNet pré-entraîné, quelle stratégie d'adaptation à VitalVideos
+généralise le mieux ? Nous comparons (Table~\ref{tab:ft}) : (A)~initialisation
+pré-entraînée $+$ fine-tuning \emph{complet} (toutes couches) ; (B, C)~\emph{gel} de
+l'encodeur (seul le décodeur réentraîné, deux variantes) ; (D)~entraînement de
+\emph{zéro} (init.\ aléatoire) ; (E)~un entraînement sur $\sim$100~sujets, sur un
+split de test différent. L'optimiseur est Adam (pas $10^{-3}$, \emph{weight decay}
+$10^{-4}$), 30~époques, la meilleure époque étant retenue sur la validation.
+
+\begin{table}[h]
+\centering
+\caption{Étude de fine-tuning de PhysNet (validation du fine-tuning). Le modèle
+retenu (A) est celui évalué en comparaison held-out (Table~\ref{tab:visage}).}
+\label{tab:ft}
+\begin{tabular}{llc}
+\toprule
+ & Stratégie & MAE (bpm) \\
+\midrule
+A & Init.\ pré-entraînée $+$ fine-tuning \textbf{complet} & \textbf{2{,}1} \\
+D & Entraînement de zéro (aléatoire) & 5{,}5 \\
+B & Gel de l'encodeur (variante 1) & 21{,}7 \\
+C & Gel de l'encodeur (variante 2) & 23{,}0 \\
+E & $\sim$100 sujets, split différent (confondu) & 14{,}7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Enseignements.} (1)~Le \emph{gel} de l'encodeur est catastrophique
+(21--23~bpm) : les features 3D pré-entraînées sur d'autres domaines (visages clairs,
+données synthétiques) ne se transposent pas telles quelles ; il faut réentraîner tout
+le réseau. (2)~L'\emph{initialisation pré-entraînée aide nettement} (2{,}1 contre
+5{,}5 de zéro, soit un facteur $\sim$2{,}7) : le pré-entraînement fournit un a priori
+utile malgré le changement de domaine. (3)~L'expérience à 100~sujets, sur un split de
+test différent et des extractions hétérogènes, est \emph{non concluante} (confondue)
+--- nous ne surinterprétons pas ce chiffre. Nous retenons la stratégie~A.
+
+\section{Protocole d'évaluation et rigueur}
+\label{sec:rigueur}
+
+\paragraph{Absence de fuite.} Un modèle profond peut \emph{mémoriser} un sujet (teint,
+morphologie, éclairage) ; l'évaluer sur des fenêtres du même sujet qu'à
+l'entraînement gonfle artificiellement les scores. Nous imposons une séparation
+\textbf{au niveau de la personne} : toutes les prises d'un individu sont entièrement
+en apprentissage \emph{ou} en test. Pour la validation palmaire, nous avons constaté
+que quatre personnes figuraient sous deux identifiants de dossier distincts ; nous
+fusionnons ces dossiers (union par identifiant de session) avant la partition.
+
+\paragraph{Une leçon de fuite annexe.} Nous avons vérifié empiriquement qu'entraîner
+le module d'abstention sur des sujets déjà vus par les modèles \emph{dégrade} le
+résultat held-out (la MAE passe de $1{,}15$ à $2{,}48$~bpm) : les SNR de ces sujets
+mémorisés sont artificiellement élevés, si bien que le module apprend à leur faire
+trop confiance. Le module de qualité doit donc être calibré sur des sujets
+\emph{jamais vus} par les modèles.
+
+\paragraph{Métriques.} Nous rapportons la MAE de FC ($\frac1N\sum|\hat{f}-f|$), le
+pourcentage de mesures à moins de 5~bpm, le SNR aveugle, et la corrélation de Pearson
+d'onde. L'évaluation visage est au niveau scénario sur 22~sujets ; la validation
+palmaire est une \textbf{validation croisée à 5~plis, groupée par personne} sur
+108~individus, un modèle réentraîné de zéro par pli et les prédictions held-out
+agrégées.
+
+\section{Résultats}
+\label{sec:resultats}
+
+\subsection{Comparaison des méthodes sur VitalVideos (visage)}
+La Table~\ref{tab:visage} rassemble les cinq méthodes sur le held-out (54~scénarios,
+22~sujets jamais vus). PhysNet affiné domine en brut (MAE~3{,}89~bpm, 83\% à moins de
+5~bpm), suivi du réseau~1D (4{,}69). Les méthodes sans modèle sont nettement derrière
+(CHROM~8{,}69 ; POS~9{,}90), CHROM-ITA améliorant légèrement CHROM (8{,}27), ce qui
+confirme l'intérêt --- modeste --- du conditionnement au teint.
+
+\begin{table}[h]
+\centering
+\caption{Comparaison held-out sur VitalVideos (54~scénarios, 22~sujets sans fuite).
+La colonne \og{}validés\fg{} applique la politique d'abstention (on ne retient que les
+mesures de SNR $>-1$~dB) : l'erreur sur les mesures \emph{acceptées} chute
+fortement.}
+\label{tab:visage}
+\begin{tabular}{lccccc}
+\toprule
+Méthode & MAE & \%$<$5 & Validés & MAE (validés) \\
+\midrule
+PhysNet (fine-tuné, A) & \textbf{3{,}89} & 83\% & 35/52 & \textbf{0{,}25} \\
+CNN~1D (régions)       & 4{,}69 & 80\% & 40/54 & 1{,}27 \\
+CHROM-ITA              & 8{,}27 & 67\% & 21/54 & 4{,}27 \\
+CHROM                  & 8{,}69 & 59\% & 17/54 & 3{,}52 \\
+POS                    & 9{,}90 & 65\% & 23/54 & 3{,}90 \\
+\midrule
+Fusion adaptative      & 4{,}69 & 81\% & \multicolumn{2}{c}{consensus $\times43$, sélection $\times11$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{L'apport de l'abstention.} La colonne \og{}MAE (validés)\fg{} est éloquente : en
+ne conservant que les mesures de bon SNR, PhysNet passe de 3{,}89 à
+\textbf{0{,}25~bpm} et le réseau~1D de 4{,}69 à 1{,}27~bpm. Le prix est une
+\emph{couverture} partielle (35/52 et 40/54). Le réseau~1D offre la meilleure
+couverture (40/54) ; PhysNet la meilleure précision sur mesures acceptées. Ce
+compromis \emph{couverture / précision} est au c\oe{}ur de l'approche : en contexte
+médical, mieux vaut s'abstenir que rendre une valeur fausse. La fusion adaptative
+choisit le consensus dans 43~cas sur 54 et bascule en sélection-SNR dans les
+11~cas de désaccord.
+
+\subsection{Le constat d'inéquité et la piste palmaire}
+\label{sec:paume}
+Le point critique apparaît en stratifiant par phototype : sur peau très foncée, le
+\emph{visage} devient peu fiable. Nous proposons de mesurer sur la \textbf{paume},
+seule peau glabre faiblement pigmentée quel que soit le phototype. Le pipeline
+palmaire reprend la Section~\ref{sec:cnn1d} : 18~régions issues de MediaPipe~Hands
+(huit régions anatomiques --- centre, thénar, hypothénar, sous-doigts, poignet ---,
+une grille $3\times3$, la paume entière), $\times 9$~canaux, soit 162~canaux
+d'entrée. Le jeu palmaire compte 127~enregistrements de 108~personnes (75~Fitz\,6,
+48~Fitz\,5, 4~Fitz\,4), extraits des scénarios \emph{facepalm} et \emph{handheld}.
+
+\paragraph{Paume contre visage (méthodes classiques).} Sur 24~vidéos, la paume
+surclasse nettement le visage sur peau foncée (Table~\ref{tab:palmvsface}) : sur
+Fitzpatrick~6, le visage s'effondre (MAE~12{,}4, SNR négatif) tandis que la paume
+reste précise (MAE~1{,}1, SNR~$+7{,}1$~dB). Le SNR palmaire est \emph{positif partout},
+le SNR facial \emph{négatif partout}.
+
+\begin{table}[h]
+\centering
+\caption{Paume contre visage (meilleure méthode sans modèle par site), par phototype.
+MAE en bpm, SNR aveugle en dB.}
+\label{tab:palmvsface}
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{\textbf{Paume}} & \multicolumn{2}{c}{\textbf{Visage}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Phototype & MAE & SNR & MAE & SNR \\
+\midrule
+Fitzpatrick 5 ($n=7$)  & 1{,}3 & $+5{,}9$ & 2{,}4  & $-1{,}6$ \\
+Fitzpatrick 6 ($n=17$) & 1{,}1 & $+7{,}1$ & 12{,}4 & $-2{,}5$ \\
+\midrule
+Global ($n=24$)        & 1{,}2 & $+6{,}7$ & 9{,}5  & $-2{,}2$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Réseau palmaire (validation croisée sans fuite).} Le réseau~1D palmaire,
+évalué par validation croisée groupée par personne (Table~\ref{tab:cv}), atteint une
+MAE globale de \textbf{0{,}69~bpm} (98\% à moins de 5~bpm, $r=0{,}88$). Surtout,
+\textbf{l'écart entre carnations disparaît} : Fitzpatrick~6 (0{,}73) est aussi bon que
+Fitzpatrick~5 (0{,}70). Les cinq plis donnent des MAE de $1{,}76 / 0{,}14 / 0{,}06 /
+0{,}24 / 1{,}38$~bpm.
+
+\begin{table}[h]
+\centering
+\caption{Réseau~1D palmaire --- validation croisée 5~plis, groupée par personne, sans
+fuite (127~enregistrements, 108~personnes).}
+\label{tab:cv}
+\begin{tabular}{lcccc}
+\toprule
+Phototype & $n$ & MAE (bpm) & SNR (dB) & $r$ (onde) \\
+\midrule
+Fitzpatrick 4 & 4  & 0{,}00 & $+8{,}1$ & 0{,}90 \\
+Fitzpatrick 5 & 48 & 0{,}70 & $+6{,}8$ & 0{,}89 \\
+Fitzpatrick 6 & 75 & 0{,}73 & $+6{,}7$ & 0{,}88 \\
+\midrule
+Global        & 127 & \textbf{0{,}69} & $+6{,}8$ & 0{,}88 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Prudence d'interprétation.} Sur un signal palmaire propre de $\sim$20~s,
+estimer la \emph{fréquence} dominante est une tâche \og{}facile\fg{} ; la MAE très basse en
+rend partiellement compte. La corrélation d'onde ($r=0{,}88$ sur sujets jamais vus)
+est l'indicateur le plus honnête que le modèle apprend la \emph{forme} du pouls, non
+seulement sa fréquence. Une expérience de contrôle montre par ailleurs que réduire
+l'entrée aux seuls canaux RGB (54~canaux) donne des résultats identiques : les canaux
+YUV/Lab sont redondants pour ce site.
+
+\subsection{Tests sur nos propres vidéos (smartphone)}
+\label{sec:perso}
+Nous avons filmé nos propres vidéos avec l'application open source \emph{Open Camera},
+sans instrumentation de référence (analyse qualitative). La Table~\ref{tab:phone}
+résume cinq prises. Trois enseignements se dégagent.
+
+\begin{table}[h]
+\centering
+\caption{Prises smartphone (paume). La qualité (SNR, verdict) ne suit pas le débit
+d'encodage mais la stabilité et l'éclairage de la prise.}
+\label{tab:phone}
+\begin{tabular}{lccccc}
+\toprule
+Prise & cadrage & fps & débit & SNR paume & verdict \\
+\midrule
+1 & paume seule    & 24{,}5 & 39~Mbit/s & $+2{,}9$ & GO (err 1) \\
+2 & main+visage    & 29{,}2 & 56~Mbit/s & $+2{,}0$ & GO (err 2) \\
+3 & main+visage    & 29{,}6 & 40~Mbit/s & $-2{,}3$ & refaire \\
+4 & main+visage    & 29{,}3 & 60~Mbit/s & $-4{,}0$ & refaire \\
+5 & main+visage    & 19{,}7 & 59~Mbit/s & $-1{,}4$ & refaire \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+(1)~Sur une \emph{bonne} prise (paume posée, stable, éclairée), le réseau palmaire
+retrouve la FC à \textbf{1--2~bpm} près, avec SNR positif et accord inter-méthodes
+(Fig.~\ref{fig:onde}). (2)~Le facteur dominant de qualité n'est \emph{pas} le débit
+d'encodage --- une prise à 60~Mbit/s échoue et une à 39~Mbit/s réussit --- mais la
+\textbf{stabilité et l'éclairage} ; sur les prises dégradées, le système
+\emph{s'abstient}, comme attendu. (3)~Sur ces prises smartphone à peau foncée, le
+\emph{visage} échoue (PhysNet jusqu'à 20~bpm d'erreur) là où la paume réussit,
+confirmant qualitativement le résultat d'équité en conditions réelles.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.86\linewidth]{figures/onde_paume_smartphone.png}
+\caption{Onde rPPG palmaire estimée sur une vidéo smartphone. Le système déclare la
+prise fiable (\og{}GO\fg{}) ; les trois méthodes s'accordent et le spectre présente un pic
+net, malgré la compression H.264 et une capture non instrumentée.}
+\label{fig:onde}
+\end{figure}
+
+\subsection{Résultats négatifs (rapportés honnêtement)}
+\label{sec:negatifs}
+Pour éviter à d'autres des impasses coûteuses :
+\begin{itemize}\itemsep2pt
+  \item \textbf{Apprentissage auto-supervisé} (styles SiNC~\cite{speth2023},
+  Contrast-Phys~\cite{sun2022}) : nos implémentations sur signaux régionaux se sont
+  effondrées (sortie constante) ou n'ont pas appris le pouls (corrélation nulle).
+  Ces méthodes exigent la vidéo brute multi-signaux et un réglage fin que notre
+  représentation ne permet pas.
+  \item \textbf{Pression artérielle} par morphologie du pouls : indissociable d'un
+  simple biais d'âge (AUC au niveau du hasard, $\approx0{,}50$). La voie du temps de
+  transit (deux sites optiques, p.\,ex.\ paume et visage, annulant la période de
+  pré-éjection) est théoriquement plus fondée mais bute sur la précision temporelle à
+  30--60~fps et nécessite une calibration par sujet.
+  \item \textbf{Variabilité fine de la FC} (RMSSD) : hors de portée, limitée par la
+  résolution temporelle de la caméra (33~ms à 30~fps) et l'arrondi de l'onde rPPG. La
+  variabilité \emph{grossière} (SDNN, LF/HF) reste envisageable avec haut débit
+  d'images et fusion paume$+$visage.
+\end{itemize}
+
+\section{Discussion}
+\label{sec:discussion}
+
+Le résultat central est double. D'une part, sur le visage, l'apprentissage profond
+(PhysNet, CNN~1D) domine nettement les méthodes de chrominance sur VitalVideos, et le
+fine-tuning \emph{complet} depuis une initialisation pré-entraînée est la stratégie
+gagnante. D'autre part, aucune méthode faciale ne résout le biais d'équité : sur peau
+très foncée, le signal facial est intrinsèquement faible. Le déplacement vers la
+\emph{paume} contourne ce mur physiologique, car la peau palmaire est faiblement
+pigmentée indépendamment du phototype. C'est, à notre connaissance, une piste peu
+exploitée dans la littérature rPPG, largement centrée sur le visage pour des raisons
+d'usage (surveillance passive) et de disponibilité de données. Notre cadre
+applicatif --- point de soin coopératif, population à peau foncée, jeu de données
+riche en \emph{facepalm} --- réunit précisément les conditions où cette piste devient
+pertinente.
+
+\section{Limites}
+\label{sec:limites}
+(1)~Le résultat palmaire est obtenu sur caméra industrielle (60~fps, quasi sans
+perte) ; la validation smartphone reste préliminaire ($n$ faible, sans vérité-terrain
+instrumentée). (2)~Seule la FC est étudiée ; SpO$_2$, pression et respiration ne sont
+pas atteignables de façon fiable avec ces données. (3)~L'échantillon Fitzpatrick~4 est
+très petit. (4)~Aucune validation clinique ni test utilisateur. Le statut est celui
+d'une \emph{preuve de concept forte}, non d'un produit validé.
+
+\section{Travaux futurs}
+\label{sec:futur}
+La priorité est une \textbf{collecte smartphone contrôlée} : 15--20~sujets, dont
+$\geq$10 de phototype~5--6, paume posée et stabilisée, éclairage constant, et une FC
+de référence par oxymètre de contact. Elle permettra (i)~d'établir statistiquement le
+transfert de l'avantage palmaire au smartphone, (ii)~d'affiner le modèle sur le
+domaine cible, (iii)~de calibrer l'abstention en conditions réelles. Les outils
+(contrôle qualité en direct d'une prise, journalisation de la référence, analyse
+batch stratifiée) sont préparés et publiés.
+
+\section{Conclusion}
+\label{sec:conclusion}
+Ce travail de stage présente une étude comparative détaillée de méthodes rPPG sur
+peaux foncées. Sur le visage, PhysNet affiné (MAE~3{,}89, 0{,}25 sur mesures
+acceptées) devance le réseau~1D et les méthodes classiques ; l'étude de fine-tuning
+montre qu'il faut réentraîner tout le réseau depuis une initialisation
+pré-entraînée. Mais le visage reste peu fiable sur peau très foncée ; notre
+contribution est d'y répondre en mesurant sur la \textbf{paume}, où un réseau~1D
+validé sans fuite atteint 0{,}69~bpm de MAE \emph{sans écart entre carnations}. Nous
+insistons sur la rigueur (validation sans fuite), l'honnêteté (échecs rapportés) et
+le caractère open source de la démarche.
+
+\section*{Remerciements}
+L'auteur remercie \Entreprise{} pour l'accueil et l'encadrement de ce stage, ainsi
+que les auteurs de VitalVideos et des bibliothèques open source (rPPG-Toolbox,
+MediaPipe, BiSeNet). Ce document rend compte d'un travail d'étudiant, avec les
+limites que cela suppose.
+
+\appendix
+\section{Seuils de la politique d'abstention}
+\label{app:seuils}
+Accord : \textsc{fiable} si écart-type $\leq 6$~bpm, \textsc{rejet} si $>12$~bpm.
+SNR médian : \textsc{fiable} si $>-3{,}5$~dB, \textsc{rejet} si $\leq -4{,}5$~dB.
+Témoin isolé : une méthode de SNR $>+1$~dB, détachée d'au moins 2~dB de la suivante,
+non harmonique, peut valider seule (le rBCG en est exclu, son SNR n'étant pas à la
+même échelle que l'optique). Couverture SQA : fenêtre 10~s, pas 2~s ; \textsc{fiable}
+requiert une couverture $\geq 0{,}20$, \textsc{rejet} si $<0{,}05$. Ambiguïté : le
+deuxième pic spectral (maximum local, séparé de $>4$~bpm, non harmonique) déclenche un
+doute s'il atteint $\geq 60\%$ du premier.
+
+\section{Hyperparamètres}
+\label{app:hp}
+CNN~1D : 64~canaux cachés, dilatations $\{1,2,4,8\}$, Dropout~$0{,}1$,
+$\sim$110\,000~paramètres. Fenêtres de $\mathrm{CLIP\_LEN}=128$~images
+($\approx$4{,}3~s à 30~fps). Optimiseur Adam, pas $10^{-3}$, \emph{weight decay}
+$10^{-4}$, ordonnancement cosinus, 60~époques, taille de lot~16. PhysNet : clips de
+128~images, entrée DiffNormalized $72\times72$, fine-tuning 30~époques. Bande
+d'analyse : $[0{,}7;2{,}5]$~Hz.
+
+\begin{thebibliography}{99}
+\small
+\bibitem{verkruysse2008} W.~Verkruysse, L.~O.~Svaasand, J.~S.~Nelson.
+  \emph{Remote plethysmographic imaging using ambient light.} Optics Express,
+  16(26):21434--21445, 2008.
+\bibitem{poh2010} M.-Z.~Poh, D.~J.~McDuff, R.~W.~Picard.
+  \emph{Non-contact, automated cardiac pulse measurements using video imaging and
+  blind source separation.} Optics Express, 18(10):10762--10774, 2010.
+\bibitem{dehaan2013} G.~de~Haan, V.~Jeanne.
+  \emph{Robust pulse rate from chrominance-based rPPG.} IEEE Trans. Biomedical
+  Engineering, 60(10):2878--2886, 2013.
+\bibitem{wang2017} W.~Wang, A.~C.~den~Brinker, S.~Stuijk, G.~de~Haan.
+  \emph{Algorithmic principles of remote PPG.} IEEE Trans. Biomedical Engineering,
+  64(7):1479--1491, 2017.
+\bibitem{chen2018} W.~Chen, D.~McDuff.
+  \emph{DeepPhys: Video-based physiological measurement using convolutional
+  attention networks.} ECCV, 2018.
+\bibitem{yu2019} Z.~Yu, X.~Li, G.~Zhao.
+  \emph{Remote photoplethysmograph signal measurement from facial videos using
+  spatio-temporal networks (PhysNet).} BMVC, 2019.
+\bibitem{niu2020} X.~Niu \emph{et al.}
+  \emph{RhythmNet: End-to-end heart rate estimation from face via spatial-temporal
+  representation.} IEEE Trans. Image Processing, 29:2409--2423, 2020.
+\bibitem{balakrishnan2013} G.~Balakrishnan, F.~Durand, J.~Guttag.
+  \emph{Detecting pulse from head motions in video.} CVPR, 2013.
+\bibitem{nowara2020} E.~M.~Nowara, D.~McDuff, A.~Veeraraghavan.
+  \emph{A meta-analysis of the impact of skin type and gender on non-contact
+  photoplethysmography measurements.} CVPR Workshops, 2020.
+\bibitem{sjoding2020} M.~W.~Sjoding \emph{et al.}
+  \emph{Racial bias in pulse oximetry measurement.} New England Journal of Medicine,
+  383:2477--2478, 2020.
+\bibitem{speth2023} J.~Speth \emph{et al.}
+  \emph{Non-contrastive unsupervised learning of physiological signals from video
+  (SiNC).} CVPR, 2023.
+\bibitem{sun2022} Z.~Sun, X.~Li.
+  \emph{Contrast-Phys: Unsupervised video-based remote physiological measurement via
+  spatiotemporal contrast.} ECCV, 2022.
+\bibitem{toye2023} P.-J.~Toye.
+  \emph{VitalVideos: A large-scale dataset of face videos with PPG and blood pressure
+  ground truth.} arXiv:2306.11891, 2023.
+\bibitem{bobbia2019} S.~Bobbia \emph{et al.}
+  \emph{Unsupervised skin tissue segmentation for remote photoplethysmography
+  (UBFC-rPPG).} Pattern Recognition Letters, 124:82--90, 2019.
+\bibitem{liu2023} X.~Liu \emph{et al.}
+  \emph{rPPG-Toolbox: Deep remote PPG toolbox.} NeurIPS Datasets and Benchmarks, 2023.
+\bibitem{lugaresi2019} C.~Lugaresi \emph{et al.}
+  \emph{MediaPipe: A framework for building perception pipelines.} arXiv:1906.08172,
+  2019.
+\bibitem{yu2018bisenet} C.~Yu \emph{et al.}
+  \emph{BiSeNet: Bilateral segmentation network for real-time semantic segmentation.}
+  ECCV, 2018.
+\end{thebibliography}
+
+\end{document}

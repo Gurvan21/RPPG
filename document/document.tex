@@ -1,0 +1,1447 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[provide=*,french]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{amsmath}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=black,
+  citecolor=black,
+  pdftitle={Protocole de collecte de donnees v1},
+  pdfauthor={}
+}
+
+% --- Mise en forme sobre, noir et blanc, lignes fines ---
+\titleformat{\section}
+  {\normalfont\Large\bfseries}
+  {\thesection}{0.8em}{}
+\titlespacing{\section}{0pt}{1.4em}{0.8em}
+
+\titleformat{\subsection}
+  {\normalfont\large\bfseries}
+  {\thesubsection}{0.7em}{}
+\titlespacing{\subsection}{0pt}{1.1em}{0.5em}
+
+\titleformat{\subsubsection}
+  {\normalfont\bfseries\itshape}
+  {\thesubsubsection}{0.6em}{}
+\titlespacing{\subsubsection}{0pt}{0.9em}{0.4em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small Protocole de collecte v1 --- rPPG / rBCG}
+\fancyfoot[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0.3pt}
+
+\setlist[itemize]{leftmargin=*,itemsep=2pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=*,itemsep=2pt,topsep=3pt}
+
+% --- Encadres sobres : simple cadre noir, fond blanc ou gris tres clair ---
+\usepackage[most]{tcolorbox}
+
+\newtcolorbox{notebox}[1]{
+  colback=white, colframe=black, boxrule=0.6pt, arc=0pt,
+  left=8pt, right=8pt, top=5pt, bottom=5pt,
+  title={#1}, coltitle=black, fonttitle=\bfseries\small,
+  attach boxed title to top left={yshift=-2mm, xshift=2mm},
+  boxed title style={colback=white, boxrule=0pt, top=1pt, bottom=1pt},
+  breakable
+}
+
+\newtcolorbox{warnbox}[1]{
+  colback=white, colframe=black, boxrule=1pt, arc=0pt,
+  left=8pt, right=8pt, top=5pt, bottom=5pt,
+  title={#1}, coltitle=black, fonttitle=\bfseries\small,
+  attach boxed title to top left={yshift=-2mm, xshift=2mm},
+  boxed title style={colback=white, boxrule=0pt, top=1pt, bottom=1pt},
+  breakable
+}
+
+\newtcolorbox{codebox}{
+  colback=black!4, colframe=black!4, boxrule=0pt, arc=0pt,
+  left=8pt, right=8pt, top=4pt, bottom=4pt,
+  fontupper=\ttfamily\small, breakable
+}
+
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\begin{document}
+
+% ================================================================
+% PAGE DE GARDE
+% ================================================================
+\begin{center}
+{\LARGE\bfseries PROTOCOLE DE COLLECTE DE DONN\'EES}\\[8pt]
+{\Large Version 1 --- D\'etaill\'e}\\[6pt]
+{\large Screening cardiovasculaire non invasif par smartphone (rPPG / rBCG)}\\[4pt]
+{\normalsize R\'eseau de pharmacies --- Afrique subsaharienne}
+\end{center}
+
+\vspace{0.6cm}
+\noindent\rule{\textwidth}{0.6pt}
+\vspace{0.3cm}
+
+\begin{notebox}{Pourquoi ce protocole}
+Les m\'ethodes de mesure \`a distance du rythme cardiaque (rPPG) ont \'et\'e
+d\'evelopp\'ees et valid\'ees presque exclusivement sur des populations \`a
+peau claire, en conditions de laboratoire. Une analyse r\'ecente de la
+litt\'erature (Dasari et al., 2021, repris dans Mehmood et al., 2025) montre
+que l'erreur moyenne (MAE) de la m\'ethode classique CHROM passe de
+5.2~bpm sur les phototypes Fitzpatrick I--III \`a 14.1~bpm sur les
+phototypes V--VI --- une d\'egradation qui rend la mesure cliniquement
+inutilisable. Les mod\`eles d'apprentissage profond (PhysNet, TS-CAN) sont
+moins affect\'es (6.0 $\rightarrow$ 9.5~bpm) mais restent insuffisants
+(section~4).
+
+Ce protocole vise \`a constituer le premier dataset de r\'ef\'erence collect\'e
+en conditions r\'eelles de pharmacie africaine, avec une priorit\'e absolue
+donn\'ee aux phototypes V--VI, afin de permettre le fine-tuning de mod\`eles
+qui fonctionnent r\'eellement pour cette population.
+\end{notebox}
+
+\vspace{0.3cm}
+\tableofcontents
+\newpage
+\section{Contexte scientifique et objectifs}
+
+\subsection{Le probl\`eme physique : pourquoi les peaux fonc\'ees posent
+probl\`eme}
+
+Le signal rPPG repose sur la d\'etection de variations de couleur de la peau
+de l'ordre de 0.1\% de la valeur d'un pixel, caus\'ees par l'afflux sanguin
+\`a chaque battement cardiaque. Ce signal est extr\^emement faible et doit
+\^etre extrait d'un bruit 10 \`a 500 fois plus important (variations
+d'\'eclairage, r\'eflexion sp\'eculaire, mouvement).
+
+La m\'elanine, pr\'esente en plus grande quantit\'e dans les phototypes
+Fitzpatrick \'elev\'es, absorbe une partie significative de la lumi\`ere qui
+transporte ce signal. Concr\`etement~:
+
+\begin{itemize}
+\item Le rapport signal/bruit (SNR) de la composante diffuse --- celle qui
+porte l'information cardiaque --- diminue d'environ 9.5~dB pour un phototype~I
+\`a environ 4.5~dB pour un phototype~VI.
+\item Sur smartphone bas de gamme, avec une dynamique de capteur limit\'ee,
+les pixels d'une peau tr\`es fonc\'ee peuvent \^etre satur\'es en valeurs
+basses (proches de 0) sous \'eclairage faible, ou en valeurs hautes
+(proches de 255) sous \'eclairage trop fort. Dans les deux cas, le signal
+de 0.1\% devient invisible car le pixel ne varie plus du tout.
+\end{itemize}
+
+\begin{warnbox}{Cons\'equence directe pour le protocole}
+Pour les phototypes V et VI, l'\'eclairage doit \^etre maintenu dans une
+plage interm\'ediaire --- ni trop faible (saturation basse), ni trop fort
+(saturation haute). La section~5.4 d\'etaille comment v\'erifier cela en
+temps r\'eel pendant la collecte.
+\end{warnbox}
+
+\subsection{Le probl\`eme algorithmique : pourquoi CHROM \'echoue}
+
+La m\'ethode CHROM (De Haan \& Jeanne, 2013) repose sur l'hypoth\`ese que
+toute peau humaine, sous lumi\`ere blanche, poss\`ede approximativement le
+m\^eme vecteur de couleur normalis\'e~:
+\[
+\left[\frac{R}{\|\cdot\|}, \frac{G}{\|\cdot\|}, \frac{B}{\|\cdot\|}\right]
+\approx [0.7682,\ 0.5121,\ 0.3841]
+\]
+o\`u $\|\cdot\| = \sqrt{R^2+G^2+B^2}$. Les coefficients $3, 2, 1.5, 1, 1.5$ de
+la formule CHROM sont directement d\'eriv\'es de ce vecteur (voir
+section~7.2 pour la d\'erivation compl\`ete).
+
+Ce vecteur a \'et\'e mesur\'e sur des sujets de phototypes~I \`a~V dans un
+laboratoire europ\'een, sous \'eclairage blanc contr\^ol\'e. Deux \'ecarts
+se cumulent en conditions r\'eelles africaines~:
+
+\begin{enumerate}
+\item \textbf{\'Ecart li\'e au phototype} : la m\'elanine absorbe
+pr\'ef\'erentiellement le vert et le bleu. Le vrai vecteur de peau pour un
+phototype~VI est probablement plus proche de $[0.85,\ 0.43,\ 0.30]$ que de
+$[0.7682,\ 0.5121,\ 0.3841]$.
+\item \textbf{\'Ecart li\'e \`a l'\'eclairage} : le vecteur standard suppose
+une lumi\`ere blanche. Sous LED chaude ou n\'eon, le spectre de la lumi\`ere
+ambiante d\'eforme diff\'eremment les trois canaux R, G, B, ce qui modifie
+le ratio optimal entre les deux signaux de chrominance.
+\end{enumerate}
+
+Quand les coefficients de la formule ne correspondent plus au vrai vecteur
+de peau et \`a la vraie couleur de la lumi\`ere, la projection de chrominance
+n'annule plus correctement le bruit lumineux --- un r\'esidu de lumi\`ere
+reste dans le signal final et peut devenir plus grand que le signal cardiaque
+lui-m\^eme. C'est ce r\'esidu que ce protocole vise \`a mesurer et \`a
+corriger par phototype.
+
+\subsection{Objectifs du dataset}
+
+\begin{enumerate}
+\item Mesurer objectivement, pour chaque phototype, l'\'ecart entre le
+vecteur de peau r\'eel et le vecteur standard de De Haan, afin de recalculer
+des coefficients CHROM adapt\'es (section~7).
+\item Fournir des donn\'ees d'entra\^inement et de fine-tuning pour les
+mod\`eles PhysNet et TS-CAN, dans des conditions repr\'esentatives du
+d\'eploiement final.
+\item Couvrir la diversit\'e r\'eelle des conditions de d\'eploiement~:
+\'eclairage de pharmacie (LED, n\'eon), lumi\`ere naturelle tropicale,
+smartphones d'entr\'ee de gamme, et niveaux de mouvement/parole r\'ealistes.
+\item Permettre une \'evaluation rigoureuse, strat\'ifi\'ee par phototype et
+par condition, des performances de chaque m\'ethode (CHROM original, CHROM
+adaptatif, PhysNet, TS-CAN).
+\end{enumerate}
+
+
+
+\section{Mesures collect\'ees}
+
+\subsection{D\'efinitions}
+
+\subsubsection*{PPG --- Photoplethysmogram}
+
+Le PPG est la forme d'onde brute du pouls, telle que mesur\'ee par
+l'oxym\`etre. C'est une courbe continue qui oscille \`a chaque battement
+cardiaque. Le PPG est la donn\'ee la plus riche~: HR, HRV et SpO2 en sont
+tous d\'eriv\'es. Pour l'entra\^inement des mod\`eles par apprentissage
+profond (loss de corr\'elation de Pearson, section~7.3), disposer de la
+forme d'onde compl\`ete et pas seulement d'un HR ponctuel est
+essentiel.
+
+\subsubsection*{HR --- Heart Rate}
+
+Nombre de battements cardiaques par minute (bpm), calcul\'e \`a partir des
+pics du PPG. C'est la m\'etrique de sortie principale de toutes les
+m\'ethodes \'etudi\'ees (CHROM, POS, PhysNet, TS-CAN).
+
+\subsubsection*{SpO2 --- Saturation en oxyg\`ene}
+
+Pourcentage d'h\'emoglobine satur\'ee en oxyg\`ene dans le sang art\'eriel
+(normal~: 95--100\%). Mesur\'e par l'oxym\`etre via deux longueurs d'onde
+(rouge et infrarouge). Pertinent pour le d\'epistage de pathologies
+respiratoires.
+
+\subsubsection*{BP --- Blood Pressure}
+
+Pression art\'erielle, exprim\'ee en mmHg sous la forme
+systolique/diastolique (ex.\ 120/80). Mesur\'ee par un tensiom\`etre \`a
+brassard. C'est la cible de l'estimation par Pulse Transit Time (PTT,
+section~8).
+
+\subsection{Tableau r\'ecapitulatif}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{2.2cm} X P{4.3cm}}
+\toprule
+\textbf{Mesure} & \textbf{Description} & \textbf{Mat\'eriel} \\
+\midrule
+PPG & Forme d'onde compl\`ete du pouls, \'echantillonn\'ee \`a $\sim$60~Hz &
+Oxym\`etre de pouls (type Contec CMS50D+, USB) \\
+HR & Fr\'equence cardiaque instantan\'ee, \'echantillonn\'ee \`a 1~Hz &
+Oxym\`etre (calcul interne) \\
+SpO2 & Saturation en oxyg\`ene, \'echantillonn\'ee \`a 1~Hz &
+Oxym\`etre (calcul interne) \\
+BP & Pression art\'erielle syst./diast., une mesure par enregistrement~2 &
+Tensiom\`etre \`a brassard (type Omron) \\
+Vid\'eo visage & Signal source pour rPPG (couleur) et rBCG (mouvement) &
+Smartphone, cam\'era avant, 30--60~fps \\
+Vid\'eo paume (optionnel) & Second point de mesure pour le PTT multi-site &
+Smartphone, cam\'era avant \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Pourquoi ces quatre mesures, ni plus ni moins}
+
+Le choix de limiter ce protocole \`a PPG, HR, SpO2 et BP en excluant
+ECG, fr\'equence respiratoire d\'edi\'ee et r\'eponse \'electrodermale
+suit directement la logique du protocole VitalVideos (Toye, 2023), qui est
+notre principale source d'inspiration m\'ethodologique pour cette section
+(voir section~3 pour le d\'etail des emprunts).
+
+\begin{itemize}
+\item \textbf{PPG, HR et SpO2 proviennent du m\^eme appareil, au m\^eme
+co\^ut.} L'oxym\`etre qui capture le PPG calcule le HR et le SpO2 en
+interne, \`a partir des deux longueurs d'onde (rouge/infrarouge) qu'il
+utilise d\'ej\`a. Ne pas les enregistrer reviendrait \`a ignorer une
+donn\'ee qui n'a aucun co\^ut marginal de collecte.
+\item \textbf{BP est un signal physiologiquement ind\'ependant du PPG
+seul.} Le PPG capture la forme du flux sanguin en un point. La pression
+art\'erielle d\'epend de la rigidit\'e art\'erielle et du volume sanguin
+total une information que le PPG \`a un point unique ne contient pas.
+VitalVideos a donc ajout\'e un tensiom\`etre s\'epar\'e plut\^ot que de
+tenter de d\'eriver le BP du PPG seul, pr\'ecis\'ement parce que ce sont
+deux mesures ind\'ependantes qui doivent \^etre collect\'ees ensemble pour
+qu'un mod\`ele apprenne leur relation (typiquement via le PTT, qui
+n\'ecessite par d\'efinition deux points de mesure distincts, pas un seul
+PPG).
+\item \textbf{ECG, RR d\'edi\'ee et GSR amélioreraient la richesse
+scientifique mais au prix d'un mat\'eriel et d'un temps suppl\'ementaires
+par sujet.} VitalVideos identifie lui-m\^eme l'ECG comme l'ajout le plus
+pr\'ecieux qu'il regrette de ne pas avoir collect\'e (Toye, 2023, section
+\guillemotleft~Reflection and suggestions for future datasets~\guillemotright),
+suivi de la GSR puis de la RR. Ce protocole fait le choix inverse~:
+maximiser le nombre de sujets collect\'es --- en particulier dans les
+phototypes V--VI sous-repr\'esent\'es --- plut\^ot que la richesse de
+signaux par sujet. PPG/HR/SpO2/BP reste donc le sous-ensemble minimal
+cohérent~: retirer SpO2 ou HR ne simplifierait rien (m\^eme geste, m\^eme
+appareil), et retirer BP supprimerait l'objectif PTT dans son ensemble.
+\end{itemize}
+
+\newpage
+\section{Niveaux de collecte}
+
+\subsection{Document d'inspiration et r\'ef\'erences principales}
+
+Ce protocole s'appuie sur trois sources principales, dont les apports
+respectifs sont d\'etaill\'es ci-dessous.
+
+\textbf{Toye, P. (2023). \emph{Vital Videos: A public dataset of videos
+with PPG and BP ground truths}.} Ce document d\'ecrit le protocole de
+collecte du dataset VitalVideos-Europe-1 (850~sujets) et constitue la
+principale source d'inspiration m\'ethodologique de ce protocole. Plusieurs
+\'el\'ements en sont repris directement~: la s\'eparation en deux
+enregistrements distincts (repos puis mesure de pression, section~9.3--9.4),
+la r\`egle de placement de l'oxym\`etre sur le bras oppos\'e au brassard
+(section~9.2), le seuil de 150~lux pour l'\'eclairage minimal (section~5.4),
+et le choix des quatre mesures PPG/HR/SpO2/BP (section~2.3). Les limites que
+les auteurs identifient eux-m\^emes --- usage d'une cam\'era industrielle
+plut\^ot que d'un smartphone, absence de revue \'ethique formelle,
+classification subjective du phototype, sc\'enarios uniquement silencieux,
+population europ\'eenne \`a 90\% phototypes~I--III --- sont autant de points
+que ce protocole cherche \`a corriger (section~3.6).
+
+\textbf{Dasari, A., Prakash, S. K. A., Jeni, L. A. \& Tucker, C. S. (2021).
+\emph{Evaluation of biases in remote photoplethysmography methods}. npj
+Digital Medicine.} Cette \'etude est la premi\`ere \`a avoir quantifi\'e
+exp\'erimentalement le biais de phototype sur des sujets r\'eels, en
+collectant des donn\'ees en Inde et en Sierra Leone et en les comparant \`a
+un appareil de r\'ef\'erence approuv\'e FDA. C'est la source des chiffres de
+d\'egradation utilis\'es dans ce protocole (section~1, section~4).
+
+\textbf{Mehmood, A. et al. (2025). \emph{Demographic bias in public remote
+photoplethysmography datasets}. npj Digital Medicine.} Cette analyse
+transversale de 100~\'etudes rPPG synth\'etise les r\'esultats de Dasari et
+al.\ et d'autres travaux pour quantifier la sous-repr\'esentation des
+phototypes fonc\'es dans les datasets publics existants (section~4).
+
+\subsection{Le dilemme fondamental}
+
+En apprentissage automatique, un principe central veut que la distribution
+des donn\'ees d'entra\^inement corresponde \`a la distribution des donn\'ees
+de d\'eploiement. Appliqu\'e na\"ivement, ce principe sugg\'ererait de
+collecter uniquement en conditions r\'eelles de pharmacie. Mais deux
+probl\`emes contradictoires apparaissent~:
+
+\begin{itemize}
+\item \textbf{Si la collecte est uniquement en conditions r\'eelles}~: le
+patient bouge, parle, l'\'eclairage varie pendant l'enregistrement. Le signal
+oxym\`etre de r\'ef\'erence lui-m\^eme devient bruit\'e (artefacts de
+mouvement sur le capteur). Le mod\`ele apprend alors une relation
+signal/label impr\'ecise --- il apprend en partie le bruit.
+\item \textbf{Si la collecte est uniquement en conditions contr\^ol\'ees}~:
+les labels sont tr\`es propres, mais le mod\`ele n'a jamais vu la
+variabilit\'e r\'eelle pendant l'entra\^inement. C'est exactement le
+sch\'ema qui explique l'effondrement de PhysNet (MAE 2.95~bpm sur UBFC,
+contr\^ol\'e) lorsqu'il est \'evalu\'e sur MMPD (MAE 4.80~bpm, mobile) ---
+et plus encore sur des peaux qu'il n'a jamais vues (MAE 11.82~bpm sur
+UCLA-rPPG, peaux mixtes).
+\end{itemize}
+
+La solution retenue est une collecte en trois niveaux, combin\'es dans
+l'entra\^inement par une strat\'egie progressive (section~9).
+
+\subsection{R\'epartition des trois types}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{1.6cm} P{1.2cm} X P{1.6cm}}
+\toprule
+\textbf{Type} & \textbf{Part} & \textbf{Conditions} & \textbf{Sujets} \\
+\midrule
+A & 20\% & Int\'erieur, \'eclairage LED neutre stable (ring light), sujet
+assis immobile, distance fixe, silence & 15--20 \\
+B & 50\% & \'Eclairage r\'eel de la pharmacie (LED/n\'eon), sujet assis
+naturellement, peut parler doucement & 35--50 \\
+C & 30\% & Ext\'erieur ou int\'erieur avec lumi\`ere naturelle, conditions
+vari\'ees, l\'egers mouvements naturels & 20--30 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{TYPE A --- Conditions contr\^ol\'ees (fondation)}
+
+\textbf{Conditions exactes.} Salle ou coin d\'edi\'e de la pharmacie, ring
+light LED blanc neutre plac\'e \`a environ 60~cm du visage, sujet assis sur
+une chaise fixe, smartphone sur support \`a distance constante (50--70~cm),
+regard droit devant, silence pendant l'enregistrement~1.
+
+\textbf{Ce que cela apporte.}
+\begin{itemize}
+\item Des labels de r\'ef\'erence tr\`es pr\'ecis (variation HR
+$\pm$1~bpm), car le signal oxym\`etre n'est pas perturb\'e par le mouvement.
+\item Une mesure fiable du vecteur de peau par sujet (section~7), puisque
+l'\'eclairage est stable et document\'e.
+\item Une base de comparaison directe avec la litt\'erature, les conditions
+\'etant proches de celles d'UBFC --- avec la diff\'erence cruciale que les
+sujets sont \`a phototypes V--VI.
+\end{itemize}
+
+\textbf{Pourquoi seulement 20\%.} Ces donn\'ees apprennent au mod\`ele la
+relation fondamentale signal/fr\'equence cardiaque sans ambigu\"it\'e, mais
+ne contiennent pas la variabilit\'e du d\'eploiement r\'eel. Une proportion
+trop \'elev\'ee risquerait un sur-ajustement \`a des conditions qui ne se
+reproduiront jamais en pharmacie.
+
+\subsection{TYPE B --- Conditions semi-r\'eelles (cœur du dataset)}
+
+\textbf{Conditions exactes.} Espace normal de la pharmacie (comptoir, salle
+d'attente), \'eclairage tel quel --- pas de ring light additionnel ---,
+sujet assis dans sa position naturelle, smartphone tenu par le collecteur ou
+pos\'e sur un support simple, parole douce autoris\'ee pendant
+l'enregistrement.
+
+\textbf{Sous-types \`a documenter} (pour analyse ult\'erieure par condition
+d'\'eclairage)~:
+\begin{itemize}
+\item B1 (environ 40\% du TYPE B) : \'eclairage n\'eon fluorescent
+\item B2 (environ 40\% du TYPE B) : \'eclairage LED chaud
+\item B3 (environ 20\% du TYPE B) : m\'elange lumi\`ere naturelle et
+artificielle (proximit\'e d'une fen\^etre)
+\end{itemize}
+
+\textbf{Ce que cela apporte.} C'est la condition la plus proche du
+d\'eploiement final tout en gardant des labels encore fiables --- le sujet
+reste coop\'eratif et globalement stable. La variabilit\'e d'\'eclairage
+naturelle de la pharmacie (qui change au fil de la journ\'ee, qui peut
+inclure des n\'eons d\'efectueux, etc.) est captur\'ee et document\'ee.
+
+\subsection{TYPE C --- Conditions r\'eelles (cible du d\'eploiement)}
+
+\textbf{Conditions exactes.} Smartphone tenu \`a la main (mouvement naturel
+de la main inclus), sujet en situation de consultation normale, peut parler,
+tourner l\'eg\`erement la t\^ete, \'eclairage non contr\^ol\'e --- ce qui
+existe r\'eellement \`a cet endroit et \`a ce moment.
+
+R\'epartition recommand\'ee pour couvrir la diversit\'e de la lumi\`ere
+naturelle tropicale (d\'etails en section~6)~:
+\begin{itemize}
+\item Moments de la journ\'ee~: matin (8h--10h), midi (12h--14h), fin de
+journ\'ee (16h--18h)
+\item M\'et\'eo~: ensoleill\'e et nuageux
+\item Position relative au soleil~: ombre et plein soleil, en privil\'egiant
+la lumi\`ere lat\'erale
+\end{itemize}
+
+\textbf{Ce que cela apporte.} C'est la distribution exacte du d\'eploiement
+r\'eel. Aucun dataset existant --- UBFC, PURE, MMPD, UCLA-rPPG, VitalVideos
+--- ne contient cette combinaison sp\'ecifique de population (phototypes
+V--VI), de mat\'eriel (smartphones d'entr\'ee de gamme africains) et de
+conditions (pharmacie + lumi\`ere tropicale). M\^eme 20--30 sujets bien
+document\'es dans ces conditions apportent plus de valeur, pour l'objectif
+de d\'eploiement, que des centaines de sujets suppl\'ementaires en
+conditions parfaites.
+
+\textbf{Limite \`a documenter.} Les labels de r\'ef\'erence peuvent \^etre
+localement moins pr\'ecis (artefacts de mouvement sur l'oxym\`etre). Chaque
+enregistrement TYPE C doit \^etre annot\'e avec un indicateur de qualit\'e
+du signal de r\'ef\'erence (section~5.5).
+
+\subsection{Ce que ce protocole corrige par rapport \`a VitalVideos}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{X X}
+\toprule
+\textbf{Protocole VitalVideos (Toye, 2023)} & \textbf{Ce protocole} \\
+\midrule
+Cam\'era industrielle (Basler) sur tr\'epied fixe, mise au point manuelle &
+Smartphones r\'eels du march\'e local, repr\'esentatifs du d\'eploiement
+final \\
+Aucune revue \'ethique formelle (absence d'affiliation institutionnelle) &
+Validation \'ethique recherch\'ee via affiliation acad\'emique et/ou
+entreprise \\
+Classification du phototype par jugement visuel subjectif uniquement &
+Classification visuelle compl\'et\'ee par un vecteur de peau mesur\'e
+objectivement depuis les pixels (section~4.4) \\
+Participants instruits de rester silencieux et immobiles dans tous les cas &
+Trois niveaux de mouvement/parole document\'es (TYPE A/B/C) \\
+Population europ\'eenne (environ 90\% phototypes I--III) &
+Priorit\'e explicite aux phototypes V--VI (section~4) \\
+Collecte int\'erieure uniquement (contrainte m\'et\'eorologique) &
+Collecte ext\'erieure incluse, avec grille de r\'epartition d\'edi\'ee
+(section~6) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\newpage
+\section{Distribution des phototypes}
+
+\subsection{Justification de la priorisation : ce que montrent les
+\'etudes}
+
+La litt\'erature r\'ecente fournit des chiffres pr\'ecis qui justifient la
+priorisation retenue dans ce protocole.
+
+\textbf{Dasari et al.\ (2021, npj Digital Medicine)} ont \'et\'e les
+premiers \`a quantifier ce biais directement sur des sujets r\'eels, en
+collectant des donn\'ees de fr\'equence de pouls et de vid\'eo faciale auprès
+de sujets en Inde et en Sierra Leone, compar\'ees \`a un appareil de
+r\'ef\'erence approuv\'e par la FDA. Leurs r\'esultats, repris dans l'analyse
+transversale de Mehmood et al.\ (2025, npj Digital Medicine) portant sur
+100~\'etudes rPPG, montrent que les m\'ethodes classiques bas\'ees sur la
+chrominance (CHROM, POS) ont une erreur moyenne absolue (MAE) de 5.2~bpm sur
+les sujets phototypes~I--III, qui se d\'egrade \`a 14.1~bpm sur les sujets
+phototypes~V--VI ($p<0.01$). Les mod\`eles d'apprentissage profond montrent
+une d\'egradation moindre mais toujours significative, passant de 6.0~bpm \`a
+9.5~bpm sur la m\^eme plage de phototypes. Les auteurs concluent que,
+m\^eme si les approches neuronales modernes att\'enuent partiellement les
+biais li\'es au phototype, les d\'es\'equilibres d\'emographiques des
+datasets publics se traduisent toujours par des \'ecarts de pr\'ecision
+cliniquement significatifs.
+
+\textbf{Une m\'eta-analyse compl\'ementaire}, portant sur trois datasets
+totalisant 73~individus et plus de 400~vid\'eos, rapporte un RMSE passant de
+6.69~bpm \`a 18.98~bpm pour les phototypes les plus fonc\'es --- confirmant
+que la d\'egradation n'est pas un artefact isol\'e \`a une seule \'etude
+mais un r\'esultat reproduit \`a travers plusieurs sources de donn\'ees
+ind\'ependantes.
+
+\textbf{La cause structurelle} de ce biais est la sous-repr\'esentation des
+phototypes fonc\'es dans les datasets d'entra\^inement existants~: les
+phototypes~V et~VI repr\'esentent typiquement moins de 5\% des sujets dans
+UBFC, MMSE-HR et AFRL, contre 90\% de phototypes~I--III dans VitalVideos-
+Europe-1 (Toye, 2023). Un mod\`ele entra\^in\'e sur ces distributions n'a
+statistiquement presque jamais vu de signal rPPG sur peau fonc\'ee pendant
+son apprentissage.
+
+\subsection{Pourquoi la d\'egradation n'est pas lin\'eaire}
+
+Un point important pour comprendre la priorisation~: l'erreur n'augmente
+pas progressivement du phototype~I au phototype~VI, elle s'acc\'el\`ere
+fortement \`a partir du phototype~V. Cela correspond \`a la fois \`a un
+effet physique (la concentration de m\'elanine augmente non lin\'eairement
+sur l'\'echelle Fitzpatrick) et \`a un effet de distribution des donn\'ees
+(les phototypes~V--VI sont quasiment absents des corpus d'entra\^inement
+existants, alors que les phototypes~III--IV y sont d\'ej\`a partiellement
+repr\'esent\'es). C'est pourquoi ce protocole concentre l'essentiel de
+l'effort de collecte sur les phototypes~V et~VI plut\^ot que de r\'epartir
+uniform\'ement l'effort sur l'ensemble de l'\'echelle.
+
+\subsection{R\'epartition cible}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{4cm} P{2.5cm} P{2.5cm} X}
+\toprule
+\textbf{Phototype} & \textbf{Part} & \textbf{Sujets} & \textbf{R\^ole} \\
+\midrule
+Fitzpatrick I--III & 15\% & 10--15 & Permet la comparaison directe avec la
+litt\'erature existante (UBFC, PURE, VitalVideos-Europe-1) \\
+Fitzpatrick IV & 20\% & 15--20 & Population de transition, teste la
+continuit\'e des coefficients adapt\'es \\
+Fitzpatrick V & 30\% & 20--25 & Priorit\'e haute --- cœur de la population
+cible \\
+Fitzpatrick VI & 35\% & 25--30 & Priorit\'e absolue --- population la plus
+mal servie par les m\'ethodes existantes (MAE 14.1~bpm, Dasari et al.,
+2021) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Pourquoi ces seuils par groupe}
+
+Pour qu'une comparaison statistique entre groupes de phototypes soit
+significative, un minimum de 15 sujets par groupe est g\'en\'eralement
+requis, 25 \'etant pr\'ef\'erable. Avec 70--100 sujets r\'epartis selon le
+tableau ci-dessus, chaque groupe atteint ou d\'epasse ce seuil, y compris le
+groupe le plus restreint (I--III).
+
+\subsection{Classification du phototype --- m\'ethode \`a deux niveaux}
+
+\subsubsection*{Niveau 1 : classification visuelle (sur le terrain)}
+
+Un membre de l'\'equipe attribue une classe Fitzpatrick (1--6) au sujet au
+moment de la collecte, par observation directe. Cette classification rapide
+permet de suivre en temps r\'eel la progression vers les quotas du
+tableau~4.3 et de prioriser le recrutement des phototypes manquants.
+
+\subsubsection*{Niveau 2 : mesure objective (en post-traitement)}
+
+La classification visuelle reste, par nature, un jugement subjectif --- une
+limite que VitalVideos identifie explicitement dans son propre protocole
+(Toye, 2023). Pour la compl\'eter, le vecteur de peau normalis\'e est
+calcul\'e directement depuis les pixels d'une zone de joue homog\`ene, sur
+une frame stable de l'enregistrement~1~:
+
+\begin{codebox}
+def mesurer\_vecteur\_peau(roi):\\
+\quad\# roi~: tableau numpy [H, W, 3] en RGB\\
+\quad R = roi[:,:,0].mean()\\
+\quad G = roi[:,:,1].mean()\\
+\quad B = roi[:,:,2].mean()\\[4pt]
+\quad norme = sqrt(R**2 + G**2 + B**2)\\
+\quad vecteur = [R, G, B] / norme\\[4pt]
+\quad return vecteur\\
+\quad \# Reference De Haan : [0.7682, 0.5121, 0.3841]
+\end{codebox}
+
+Une classification de phototype par seuils de luminosit\'e du canal vert
+($G/255$) compl\`ete cette mesure~:
+
+\begin{codebox}
+luminosite = G / 255.0\\[2pt]
+si luminosite \textgreater{} 0.50 : phototype = 1\\
+sinon si luminosite \textgreater{} 0.42 : phototype = 2\\
+sinon si luminosite \textgreater{} 0.35 : phototype = 3\\
+sinon si luminosite \textgreater{} 0.28 : phototype = 4\\
+sinon si luminosite \textgreater{} 0.22 : phototype = 5\\
+sinon : phototype = 6
+\end{codebox}
+
+\begin{warnbox}{Les seuils ci-dessus sont indicatifs}
+Ces seuils proviennent d'une estimation g\'en\'erale et doivent \^etre
+recalibr\'es \`a partir des premi\`eres sessions du pilote (section~13), en
+comparant la classification automatique \`a la classification visuelle
+effectu\'ee sur le terrain. Le vecteur de peau mesur\'e (niveau~2) est de
+toute mani\`ere la donn\'ee la plus utile pour le recalcul des coefficients
+CHROM --- la classification en 6 classes n'est qu'un interm\'ediaire de
+suivi des quotas.
+\end{warnbox}
+
+\newpage
+\section{Mat\'eriel et r\'eglages}
+
+\subsection{Smartphones --- rotation de 3 \`a 4 appareils}
+
+\textbf{Choix recommand\'es}~: Samsung A03, Samsung A13, Tecno, Infinix ---
+mod\`eles repr\'esentatifs du parc install\'e dans la r\'egion cibl\'ee.
+
+\textbf{Pourquoi une rotation et pas un seul appareil.} Deux exemplaires
+\guillemotleft~identiques\guillemotright\ d'un m\^eme mod\`ele peuvent avoir
+des versions de firmware diff\'erentes selon la date et le lieu d'achat. Le
+firmware contr\^ole des traitements internes --- balance des blancs
+automatique, r\'eduction de bruit, niveau de compression --- qui peuvent
+att\'enuer ou amplifier les micro-variations de couleur que le rPPG cherche
+\`a capter. Utiliser plusieurs appareils en rotation, avec documentation
+syst\'ematique du firmware, permet de mesurer cet effet a posteriori plut\^ot
+que de le d\'ecouvrir trop tard sur un seul appareil non repr\'esentatif.
+
+\textbf{Pour chaque appareil, documenter}~:
+\begin{itemize}
+\item Mod\`ele exact
+\item Version Android et num\'ero de build (\emph{Param\`etres $\rightarrow$
+\`A propos du t\'el\'ephone $\rightarrow$ Num\'ero de build})
+\item Application cam\'era utilis\'ee
+\item R\'esolution et bitrate vid\'eo configur\'es
+\end{itemize}
+
+\textbf{R\'eglages cam\'era recommand\'es.} R\'esolution et bitrate les plus
+\'elev\'es disponibles dans l'application, en d\'esactivant toute option de
+\guillemotleft~compression intelligente\guillemotright\ ou
+\guillemotleft~optimisation du stockage\guillemotright. La compression
+vid\'eo standard des smartphones (H.264) peut, \`a bitrate trop bas, lisser
+des variations de pixel de l'ordre de 0.1\% --- exactement l'amplitude du
+signal rPPG. \`A titre de r\'ef\'erence, un enregistrement de 30~secondes en
+1080p devrait peser plusieurs dizaines \`a une centaine de m\'egaoctets~; un
+fichier anormalement petit ($<$20~Mo pour 30~s) indique une compression
+trop agressive.
+
+\textbf{Distance et position.} Distance fixe de 50 \`a 70~cm entre le
+smartphone et le visage, mat\'erialis\'ee par un rep\`ere visuel sur le
+support ou la table. Hauteur de l'objectif au niveau des yeux du sujet.
+
+\subsection{Oxym\`etre de pouls}
+
+\textbf{Mod\`ele recommand\'e}~: type Contec CMS50D+ (connexion USB), comme
+utilis\'e dans le protocole VitalVideos (Toye, 2023). \`A \'eviter~:
+versions Bluetooth (latence variable, complique la synchronisation).
+
+\textbf{Placement}~: au doigt du bras \emph{oppos\'e} \`a celui qui portera
+le brassard de tension (voir section~5.3 et~9.2 pour la justification).
+
+\subsection{Tensiom\`etre}
+
+\textbf{Mod\`ele recommand\'e}~: tensiom\`etre \`a brassard de bras, type
+Omron --- conforme au mat\'eriel utilis\'e par VitalVideos.
+
+\textbf{Hygi\`ene}~: renouveler le brassard p\'eriodiquement. \`A l'\'echelle
+de ce protocole (70--100 sujets), un renouvellement tous les 50 \`a 75 sujets
+est raisonnable.
+
+\subsection{Luxm\`etre}
+
+Un luxm\`etre simple (capteur d\'edi\'e ou application smartphone calibr\'ee)
+permet de mesurer objectivement l'\'eclairage ambiant au niveau du visage.
+
+\textbf{Seuil de r\'ef\'erence}~: 150~lux minimum --- le m\^eme seuil que
+celui utilis\'e par VitalVideos (Toye, 2023), qui ajoutait une lampe
+annulaire lorsque la lumi\`ere disponible n'atteignait pas ce niveau.
+En-dessous de ce seuil, en particulier pour les phototypes V--VI, le risque
+de saturation basse des pixels (section~1.1) augmente significativement.
+
+\textbf{Plage recommand\'ee pour phototypes V--VI}~: entre 200 et 800~lux.
+Au-del\`a de 800~lux, la saturation haute devient un risque, notamment en
+plein soleil direct (TYPE C).
+
+\subsection{Indicateur de qualit\'e en temps r\'eel (recommand\'e)}
+
+Pour \'eviter de d\'ecouvrir en post-traitement qu'un enregistrement est
+inutilisable, une v\'erification simple peut \^etre effectu\'ee
+imm\'ediatement apr\`es chaque enregistrement, sur la premi\`ere frame
+stable~:
+
+\begin{codebox}
+def verifier\_qualite\_frame(frame\_rgb, face\_bbox):\\
+\quad x, y, w, h = face\_bbox\\
+\quad roi = frame\_rgb[y:y+h, x:x+w]\\[4pt]
+\quad \# Proportion de pixels satures (\textgreater250 ou \textless5)\\
+\quad satures = ((roi \textgreater\ 250) | (roi \textless\ 5)).mean()\\
+\quad si satures \textgreater\ 0.15 :\\
+\quad\quad retourner "Eclairage a corriger (trop fort ou trop faible)"\\[4pt]
+\quad \# Taille du visage dans l'image (proxy de la distance)\\
+\quad ratio\_visage = h / frame\_rgb.shape[0]\\
+\quad si ratio\_visage \textless\ 0.15 :\\
+\quad\quad retourner "Trop loin -- rapprocher le smartphone"\\
+\quad si ratio\_visage \textgreater\ 0.85 :\\
+\quad\quad retourner "Trop pres -- eloigner le smartphone"\\[4pt]
+\quad retourner "Conditions acceptables"
+\end{codebox}
+
+Cette v\'erification permet de refaire imm\'ediatement un enregistrement
+d\'efectueux plut\^ot que de le d\'ecouvrir lors de l'analyse, plusieurs
+jours ou semaines plus tard.
+
+\subsection{Support / tr\'epied l\'eger}
+
+Un support stabilise le smartphone \`a distance constante et r\'eduit le
+mouvement parasite, ce qui b\'en\'eficie \`a la fois au signal rPPG (moins
+de glissement de la zone d'int\'er\^et) et au signal rBCG (le mouvement
+cardiaque, de l'ordre de 0.01 \`a 0.1~mm, est noy\'e par tout mouvement de
+plus grande amplitude --- voir section~8.3). Pour le TYPE C, le smartphone
+peut \^etre tenu \`a la main pour repr\'esenter fid\`element l'usage r\'eel,
+mais cela doit \^etre document\'e (champ \texttt{tenu\_main}/\texttt{pose}
+dans les m\'etadonn\'ees).
+
+\newpage
+\section{Couvrir la diversit\'e de la lumi\`ere naturelle (TYPE C)}
+
+\subsection{Pourquoi la lumi\`ere naturelle est trait\'ee \`a part}
+
+Une analyse comparative sur le dataset MMPD montre que, pour les sources de
+lumi\`ere artificielle (LED, fluorescent, incandescent), les diff\'erences
+de performance entre m\'ethodes sont faibles --- mais que \emph{tous} les
+mod\`eles performent significativement moins bien sous lumi\`ere naturelle.
+
+\textbf{Cause principale identifi\'ee.} Aucune vid\'eo des datasets
+d'entra\^inement de r\'ef\'erence (UBFC, AFRL) n'a \'et\'e enregistr\'ee sous
+\'eclairage incandescent ou lumi\`ere naturelle~; leur composition spectrale
+diff\`ere significativement de celle de la lumi\`ere du soleil. Les
+mod\`eles n'ont donc jamais appris \`a reconna\^itre le
+\guillemotleft~bruit\guillemotright\ caract\'eristique de ce type de
+lumi\`ere, contrairement au bruit LED/fluorescent qu'ils savent d\'ej\`a
+filtrer. Le m\^eme constat s'applique \`a VitalVideos-Europe-1, collect\'e
+exclusivement en int\'erieur faute de conditions m\'et\'eorologiques
+favorables (Toye, 2023) --- ce protocole corrige explicitement cette
+limite (section~3.6).
+
+\textbf{Implication directe.} Ce n'est pas une limite physique
+incontournable --- une m\'ethode de personnalisation (MobilePhys) a
+montr\'e une r\'eduction d'environ 40\% de l'erreur sous \'eclairage
+incandescent simplement en exposant le mod\`ele \`a quelques exemples de
+cette condition. La collecte TYPE C, en couvrant explicitement la lumi\`ere
+naturelle, doit permettre un gain similaire par fine-tuning.
+
+\subsection{Une seule journ\'ee de collecte ne suffit pas}
+
+Le spectre de la lumi\`ere naturelle change continuellement~: angle du
+soleil, pr\'esence de nuages, r\'eflexions ambiantes. Concentrer toute la
+collecte TYPE C sur une seule journ\'ee, \`a une seule heure, ne couvrirait
+qu'une combinaison parmi beaucoup d'autres --- l'\'equivalent de
+n'enregistrer \guillemotleft~une seule LED\guillemotright\ en pensant
+couvrir \guillemotleft~toutes les LED\guillemotright.
+
+\subsection{Grille de r\'epartition recommand\'ee}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{3.5cm} P{3cm} X}
+\toprule
+\textbf{Dimension} & \textbf{Valeurs} & \textbf{Justification} \\
+\midrule
+Moment de la journ\'ee & Matin (8h--10h), midi (12h--14h), fin de journ\'ee
+(16h--18h) & La temp\'erature de couleur de la lumi\`ere solaire varie
+fortement (plus chaude/orang\'ee en d\'ebut et fin de journ\'ee, plus
+neutre/bleut\'ee \`a midi) \\
+M\'et\'eo & Ensoleill\'e, nuageux & Le ciel nuageux diffuse la lumi\`ere
+(spectre plus uniforme mais intensit\'e plus faible)~; le ciel d\'egag\'e
+ajoute une forte composante directionnelle \\
+Position relative au soleil & Ombre, plein soleil, lumi\`ere lat\'erale
+privil\'egi\'ee & Le contre-jour direct sature le fond et sous-expose le
+visage~; la lumi\`ere lat\'erale est la condition la plus repr\'esentative
+d'un usage r\'eel \`a l'ext\'erieur d'une pharmacie \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Le contre-jour --- pi\`ege \`a \'eviter syst\'ematiquement}
+
+\begin{warnbox}{R\`egle pratique}
+Si le sujet a le soleil dans le dos, son visage est dans l'ombre alors que
+le fond de l'image est tr\`es lumineux --- les pixels du fond saturent et le
+visage est sous-expos\'e. Si le sujet fait face au soleil, l'\'eblouissement
+provoque un plissement des yeux et des ombres dures (nez, sourcils) qui
+augmentent le contraste local de mani\`ere non repr\'esentative.
+
+\textbf{Consigne}~: orienter syst\'ematiquement le sujet avec la source de
+lumi\`ere naturelle sur le c\^ot\'e (lumi\`ere lat\'erale). C'est \'egalement
+la condition la plus probable lorsqu'un patient sort naturellement d'une
+pharmacie en plein jour.
+\end{warnbox}
+
+\subsection{Avec seulement 5--6 sujets par cr\'eneau}
+
+Avec 20--30 sujets TYPE C r\'epartis sur les trois moments de la journ\'ee et
+les deux conditions m\'et\'eo, chaque combinaison re\c{c}oit environ
+3--6~sujets. Ce n'est pas suffisant pour une analyse statistique fine par
+combinaison, mais c'est suffisant pour que l'ensemble TYPE~C, dans son
+ensemble, couvre une vraie diversit\'e spectrale --- ce qui est l'objectif
+du fine-tuning (le mod\`ele voit des exemples vari\'es, m\^eme s'ils ne sont
+pas nombreux individuellement).
+
+\newpage
+\section{De la collecte aux coefficients CHROM adapt\'es}
+
+Cette section explique en d\'etail comment les donn\'ees collect\'ees
+permettront de recalculer des coefficients CHROM adapt\'es par phototype ---
+l'une des contributions scientifiques attendues de ce dataset.
+
+\subsection{Rappel du pipeline CHROM standard}
+
+\begin{enumerate}
+\item \textbf{Normalisation}~: $R_n = R/\mu(R)$, $G_n = G/\mu(G)$,
+$B_n = B/\mu(B)$ --- chaque canal oscille autour de 1. Cette \'etape
+\'elimine le niveau moyen (DC) de la lumi\`ere, mais pas son oscillation
+(AC)~: une lumi\`ere qui varie de mani\`ere p\'eriodique pendant
+l'enregistrement reste pr\'esente apr\`es normalisation, \`a une \'echelle
+diff\'erente.
+\item \textbf{Standardisation par le vecteur de peau}~: $R_s = v_R R_n$,
+$G_s = v_G G_n$, $B_s = v_B B_n$, avec $[v_R, v_G, v_B]$ le vecteur de peau
+normalis\'e (standard~: $[0.7682, 0.5121, 0.3841]$).
+\item \textbf{Projections de chrominance}~:
+\[
+X_s = \frac{R_s - G_s}{v_R - v_G}, \qquad
+Y_s = \frac{R_s + G_s - 2B_s}{v_R + v_G - 2v_B}
+\]
+\item \textbf{Filtrage passe-bande} (0.75--3.5~Hz) sur $X_s$ et $Y_s$ pour
+obtenir $X_f$ et $Y_f$.
+\item \textbf{Combinaison adaptative}~: $S = X_f - \alpha Y_f$, avec
+$\alpha = \sigma(X_f)/\sigma(Y_f)$.
+\end{enumerate}
+
+\subsection{D'o\`u viennent les coefficients $3, 2, 1.5, 1, 1.5$}
+
+En d\'eveloppant les expressions de $X_s$ et $Y_s$ avec le vecteur standard
+$[0.7682, 0.5121, 0.3841]$~:
+\[
+X_s = \frac{0.7682}{0.7682-0.5121}R_n - \frac{0.5121}{0.7682-0.5121}G_n
+    = 3.0\,R_n - 2.0\,G_n
+\]
+\[
+Y_s = \frac{0.7682}{0.5121}R_n + \frac{0.5121}{0.5121}G_n -
+\frac{2\times0.3841}{0.5121}B_n
+    = 1.5\,R_n + 1.0\,G_n - 1.5\,B_n
+\]
+Les coefficients $3, 2, 1.5, 1, 1.5$ sont donc enti\`erement d\'etermin\'es
+par le choix du vecteur $[v_R, v_G, v_B]$. \textbf{Si ce vecteur change, les
+coefficients changent selon la m\^eme formule.}
+
+\subsection{La fonction de recalcul, \`a appliquer aux donn\'ees
+collect\'ees}
+
+Pour chaque sujet (ou chaque groupe de phototype, apr\`es agr\'egation des
+vecteurs mesur\'es en section~4.6), de nouveaux coefficients sont
+calcul\'es~:
+
+\begin{codebox}
+def calculer\_coefficients\_chrom(vecteur):\\
+\quad vR, vG, vB = vecteur\\[4pt]
+\quad denom\_X = vR - vG\\
+\quad a1 = vR / denom\_X\quad\#\ remplace 3\\
+\quad a2 = vG / denom\_X\quad\#\ remplace 2\\[4pt]
+\quad denom\_Y = vR + vG - 2*vB\\
+\quad a3 = vR / denom\_Y\quad\#\ remplace 1.5\\
+\quad a4 = vG / denom\_Y\quad\#\ remplace 1.0\\
+\quad a5 = 2*vB / denom\_Y\ \#\ remplace 1.5\\[4pt]
+\quad return a1, a2, a3, a4, a5\\[6pt]
+\#\ Verification : le vecteur De Haan original redonne\\
+\#\ exactement [3.0, 2.0, 1.5, 1.0, 1.5]
+\end{codebox}
+
+\subsection{Ce que les donn\'ees collect\'ees doivent permettre de
+produire}
+
+\`A l'issue de la collecte, pour chaque groupe de phototype (I--III, IV, V,
+VI), un tableau de coefficients recalcul\'es du type suivant doit pouvoir
+\^etre produit~:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{2.5cm} P{1.4cm} P{1.4cm} P{1.4cm} P{1.4cm}
+P{1.4cm}}
+\toprule
+\textbf{Phototype} & $a_1$ & $a_2$ & $a_3$ & $a_4$ & $a_5$ \\
+\midrule
+I--II (r\'ef\'erence) & 3.00 & 2.00 & 1.50 & 1.00 & 1.50 \\
+III & ? & ? & ? & ? & ? \\
+IV & ? & ? & ? & ? & ? \\
+V & ? & ? & ? & ? & ? \\
+VI & ? & ? & ? & ? & ? \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Pour produire ce tableau, chaque sujet doit fournir}~:
+\begin{itemize}
+\item Un vecteur de peau mesur\'e dans des conditions d'\'eclairage
+document\'ees et stables (id\'ealement TYPE A, o\`u l'\'eclairage est
+contr\^ol\'e et le vecteur mesur\'e n'est pas confondu avec un effet de la
+lumi\`ere ambiante).
+\item Sa classe de phototype (section~4.5).
+\end{itemize}
+
+\subsection{Au-del\`a de la formule analytique : coefficients appris}
+
+Une fois les coefficients analytiques recalcul\'es (7.4) sur le TYPE A, une
+seconde \'etape consiste \`a les affiner par apprentissage --- en utilisant
+les coefficients $a_1, \ldots, a_5$ comme param\`etres entra\^inables d'un
+mod\`ele PyTorch, initialis\'es aux valeurs de De Haan, puis optimis\'es pour
+minimiser l'\'ecart entre le HR pr\'edit et le HR de r\'ef\'erence (oxym\`etre)
+sur les donn\'ees TYPE~A et TYPE~B du m\^eme groupe de phototype. Cette
+\'etape ne n\'ecessite aucune donn\'ee suppl\'ementaire par rapport \`a ce
+que ce protocole collecte d\'ej\`a --- elle r\'eutilise directement les
+paires (signal vid\'eo, HR oxym\`etre) de chaque sujet.
+
+\begin{notebox}{Pourquoi cette double approche est une contribution
+originale}
+\`A notre connaissance, aucune publication n'a mesur\'e le vecteur de peau
+r\'eel ni recalcul\'e les coefficients CHROM pour des populations africaines
+en conditions de pharmacie. La combinaison d'un recalcul analytique
+(section~7.4, interpr\'etable, li\'e directement \`a la physique de la
+m\'elanine) et d'un raffinement appris (section~7.5, qui peut capturer des
+effets que la formule analytique ne mod\'elise pas, comme l'interaction avec
+l'\'eclairage LED) constitue un r\'esultat scientifique exploitable
+ind\'ependamment du fine-tuning des mod\`eles de deep learning.
+\end{notebox}
+
+\newpage
+\section{Capture optionnelle du rBCG et estimation du PTT}
+
+\subsection{Pourquoi consid\'erer le rBCG en compl\'ement du rPPG}
+
+Le rPPG (variation de couleur) et le rBCG (remote
+ballistocardiography --- micro-mouvement m\'ecanique caus\'e par
+l'\'ejection du sang \`a chaque battement) sont deux signaux du m\^eme
+\'ev\'enement cardiaque, mais sensibles \`a des sources de bruit
+diff\'erentes~:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{4cm} X X}
+\toprule
+\textbf{Condition} & \textbf{rPPG} & \textbf{rBCG} \\
+\midrule
+\'Eclairage variable & D\'egrad\'e --- la variation de lumi\`ere se confond
+avec le signal de couleur & Non affect\'e --- le mouvement ne d\'epend pas de
+la couleur \\
+Peau tr\`es fonc\'ee & SNR r\'eduit --- la m\'elanine absorbe le signal
+diffus & Non affect\'e --- la m\'elanine ne change pas la position des
+pixels \\
+Sujet immobile & Non affect\'e & Signal faible --- le micro-mouvement
+cardiaque (0.01--0.1~mm) approche la r\'esolution du capteur \\
+Sujet bouge (parole, rotation t\^ete) & Partiellement compens\'e par CHROM
+& Masqu\'e --- un mouvement de quelques mm domine totalement le
+micro-mouvement cardiaque \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+La capture simultan\'ee des deux signaux permettrait, en TYPE A et B, une
+fusion pond\'er\'ee par le rapport signal/bruit de chacun, potentiellement
+plus robuste qu'un seul des deux signaux pris isol\'ement --- en particulier
+pour les phototypes V--VI o\`u le rPPG seul est le plus pénalis\'e.
+
+\subsection{Le Pulse Transit Time (PTT) et la pression art\'erielle}
+
+Le PTT est le d\'elai entre deux signaux li\'es au m\^eme battement
+cardiaque, mesur\'es \`a deux endroits diff\'erents. Ce d\'elai est
+corr\'el\'e \`a la vitesse de propagation de l'onde de pouls dans les
+art\`eres, elle-m\^eme li\'ee \`a la rigidit\'e art\'erielle et donc \`a la
+pression art\'erielle~:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{2.8cm} P{2.8cm} P{2.8cm} X}
+\toprule
+\textbf{\'Etat} & \textbf{Vaisseaux} & \textbf{PTT} & \textbf{Pression} \\
+\midrule
+Hypertension & Rigides & Court ($<$100~ms) & \'Elev\'ee \\
+Normo-tension & Normaux & Normal (100--200~ms) & Normale \\
+Hypotension & Souples & Long ($>$200~ms) & Basse \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Dans ce protocole, le PTT serait approxim\'e par le d\'elai entre un pic du
+signal rBCG (visage) et le pic correspondant du signal rPPG, ou entre deux
+signaux rPPG mesur\'es sur deux r\'egions diff\'erentes (visage et paume ---
+d'o\`u l'int\'er\^et de la vid\'eo paume optionnelle de la section~2.2). Ce
+PTT approxim\'e diff\`ere du PTT au sens strict (d\'elai ECG/PPG), comme
+not\'e en section~2.3.
+
+\begin{warnbox}{Statut de cette section}
+La capture du rBCG et l'estimation du PTT restent \textbf{optionnelles} dans
+ce protocole de collecte~: elles n'ajoutent aucun mat\'eriel suppl\'ementaire
+(le rBCG est extrait de la m\^eme vid\'eo visage par optical flow), mais
+elles ajoutent une charge de traitement et d'analyse. Si le temps disponible
+par sujet est contraint, la priorit\'e reste les enregistrements~1 et~2
+d\'ecrits en section~9.3--9.4. La vid\'eo paume (10--15~s suppl\'ementaires)
+peut \^etre ajout\'ee en TYPE A et B si le temps le permet, sans
+modification du mat\'eriel.
+\end{warnbox}
+
+\subsection{Limite \`a anticiper~: la stabilisation optique (OIS)}
+
+Les smartphones haut de gamme corrigent activement les micro-mouvements de
+la cam\'era (stabilisation optique, OIS), ce qui peut annuler pr\'ecis\'ement
+le signal rBCG recherch\'e. Les smartphones d'entr\'ee de gamme
+recommand\'es pour ce protocole (section~5.1) en sont g\'en\'eralement
+d\'epourvus ou peu \'equip\'es --- ce qui, dans ce cas pr\'ecis, favorise la
+collecte d'un signal rBCG exploitable.
+
+\newpage
+\section{Proc\'edure d\'etaill\'ee, \'etape par \'etape}
+
+\subsection{\'Etape 1 --- Accueil et consentement}
+
+\begin{enumerate}
+\item Pr\'esentation orale du projet, en fran\c{c}ais et dans la langue
+locale si n\'ecessaire~: objectif (am\'eliorer la mesure de signes vitaux par
+smartphone pour les populations africaines), dur\'ee (environ 10--15~min),
+caract\`ere anonyme et volontaire.
+\item Signature du formulaire de consentement \'eclair\'e, incluant
+explicitement~:
+  \begin{itemize}
+  \item l'usage des donn\'ees \`a des fins de recherche \textbf{et} de
+  d\'eveloppement commercial de technologies de sant\'e num\'erique, dans le
+  respect de l'anonymat complet des participants~;
+  \item la possibilit\'e de partage des donn\'ees anonymis\'ees avec des
+  partenaires de recherche~;
+  \item le droit de retrait \`a tout moment, sans justification.
+  \end{itemize}
+\item Attribution d'un identifiant anonyme (ex.\ \texttt{CIV\_001}). Aucun
+nom, num\'ero de t\'el\'ephone ou autre identifiant direct n'appara\^it dans
+les fichiers de donn\'ees.
+\end{enumerate}
+
+\subsection{\'Etape 2 --- Installation}
+
+\begin{enumerate}
+\item Sujet assis, smartphone sur support \`a 50--70~cm, hauteur de
+l'objectif au niveau des yeux (section~5.1).
+\item Oxym\`etre plac\'e au doigt du \textbf{bras A} (sans brassard).
+\item Brassard de tension plac\'e sur le \textbf{bras B}, \textbf{non
+gonfl\'e} \`a ce stade.
+
+\begin{warnbox}{Pourquoi cette s\'eparation des bras est imp\'erative}
+Si l'oxym\`etre et le brassard sont sur le m\^eme bras, le gonflage du
+brassard restreint temporairement la circulation sanguine dans ce bras et
+provoque une perte du signal de l'oxym\`etre pendant et juste apr\`es la
+mesure de pression. Cette r\`egle est directement reprise du protocole
+VitalVideos (Toye, 2023). Placer les deux appareils sur des bras
+diff\'erents \'evite cette interf\'erence et permet de capturer le PPG en
+continu pendant les deux enregistrements.
+\end{warnbox}
+
+\item Mesure du lux ambiant au niveau du visage avec le luxm\`etre (cible
+$\geq$150~lux, section~5.4).
+\item Classification visuelle du phototype Fitzpatrick (1--6, section~4.5).
+\item Si une vid\'eo paume est pr\'evue (section~8.2), pr\'eparer la
+position de la main \`a proximit\'e de la zone de cadrage.
+\end{enumerate}
+
+\subsection{\'Etape 3 --- Enregistrement~1 : \'etat de repos
+(60--90~secondes)}
+
+\begin{enumerate}
+\item V\'erifier que le brassard reste \textbf{non gonfl\'e} pendant toute
+cette \'etape.
+\item D\'emarrer simultan\'ement~:
+  \begin{itemize}
+  \item l'enregistrement vid\'eo du visage (smartphone)~;
+  \item la capture PPG/HR/SpO2 (oxym\`etre).
+  \end{itemize}
+\item \textbf{Synchronisation}~: pendant les 3 premi\`eres secondes de la
+vid\'eo, tenir l'oxym\`etre face \`a la cam\'era et d\'eclencher son
+affichage. Ce moment, visible dans la vid\'eo, servira de rep\`ere temporel
+commun ($t=0$) lors du post-traitement --- aucun mat\'eriel de
+synchronisation suppl\'ementaire n'est n\'ecessaire (m\^eme principe que
+VitalVideos, qui synchronise via la connexion USB directe de sa cam\'era~;
+ici on substitue un rep\`ere visuel car la cam\'era est celle du
+smartphone).
+\item Consigne selon le type de collecte (section~3)~:
+  \begin{itemize}
+  \item \textbf{TYPE A}~: immobile, silencieux, regard fixe vers la
+  cam\'era.
+  \item \textbf{TYPE B}~: position assise naturelle, parole douce
+  autoris\'ee.
+  \item \textbf{TYPE C}~: conditions ext\'erieures ou r\'eelles, l\'egers
+  mouvements naturels tol\'er\'es (rotation l\'eg\`ere de la t\^ete, parole).
+  \end{itemize}
+\item \`A la fin de l'enregistrement, v\'erifier imm\'ediatement la
+qualit\'e (section~5.5) sur une frame de la vid\'eo. En cas de probl\`eme,
+recommencer cet enregistrement avant de passer \`a l'\'etape suivante.
+\end{enumerate}
+
+\subsection{\'Etape 4 --- Enregistrement~2 : mesure de la pression
+art\'erielle (30--60~secondes)}
+
+\begin{enumerate}
+\item D\'emarrer simultan\'ement~: l'enregistrement vid\'eo, le gonflage du
+brassard, et la mesure de pression art\'erielle.
+\item La capture PPG/HR/SpO2 continue pendant cette phase.
+
+\begin{warnbox}{Pourquoi la pression doit \^etre mesur\'ee \emph{pendant}
+l'enregistrement, jamais avant ni apr\`es}
+Le gonflage du brassard est inconfortable et peut provoquer une l\'eg\`ere
+augmentation transitoire de la fr\'equence cardiaque et de la pression ---
+un effet de stress li\'e \`a la mesure elle-m\^eme. Si la pression est
+mesur\'ee \emph{avant} l'enregistrement~1, ce dernier ne refl\`ete plus
+l'\'etat de repos r\'eel. Si elle est mesur\'ee \emph{apr\`es}, la valeur de
+pression ne correspond \`a aucune vid\'eo. VitalVideos (Toye, 2023) souligne
+explicitement ce point comme \guillemotleft~de la plus haute
+importance\guillemotright\ dans son protocole. En la mesurant
+simultan\'ement avec l'enregistrement~2 --- un enregistrement distinct,
+explicitement \'etiquet\'e comme correspondant \`a cet \'etat --- les deux
+enregistrements restent coh\'erents avec l'\'etat physiologique qu'ils sont
+suppos\'es repr\'esenter.
+\end{warnbox}
+
+\item Cette vid\'eo (enregistrement~2) sert sp\'ecifiquement \`a la
+calibration de la pression art\'erielle pour le PTT (section~8.2)~; elle
+n'est pas suppos\'ee repr\'esenter un \'etat de repos pur.
+\end{enumerate}
+
+\subsection{\'Etape 5 --- (Optionnelle) Vid\'eo paume}
+
+Si pr\'evue (section~8.2)~: courte vid\'eo additionnelle de la paume de la
+main, 10--15~secondes, m\^eme smartphone, m\^emes conditions d'\'eclairage
+que les enregistrements pr\'ec\'edents.
+
+\subsection{\'Etape 6 --- Cl\^oture}
+
+\begin{enumerate}
+\item Affichage au participant des valeurs mesur\'ees (HR, SpO2, pression
+art\'erielle) --- transparence et retour direct sur la session, comme
+pratiqu\'e par VitalVideos (Toye, 2023).
+\item Remerciement, et compensation \'eventuelle selon les modalit\'es
+d\'efinies avec la pharmacie.
+\item V\'erification finale que tous les fichiers (vid\'eos, export
+oxym\`etre, m\'etadonn\'ees) sont correctement enregistr\'es sous
+l'identifiant anonyme du sujet avant de passer au participant suivant.
+\end{enumerate}
+
+\newpage
+\section{M\'etadonn\'ees enregistr\'ees par session}
+
+\subsection{Pourquoi documenter autant}
+
+Chaque variable suppl\'ementaire enregistr\'ee est une dimension d'analyse
+possible au moment du fine-tuning et de l'\'evaluation~: erreur par
+phototype, par type d'\'eclairage, par appareil, par niveau de mouvement.
+Sans ces m\'etadonn\'ees, un mod\`ele qui performe mal ne pourrait pas \^etre
+diagnostiqu\'e --- s'agit-il d'un probl\`eme li\'e au phototype, \`a
+l'\'eclairage, \`a l'appareil, ou \`a une combinaison~?
+
+\subsection{Structure recommand\'ee (par session)}
+
+\begin{codebox}
+\{\\
+\ \ "id\_anonyme": "CIV\_001",\\
+\ \ "date": "2026-07-15",\\
+\ \ "heure": "09:30",\\
+\ \ "type\_collecte": "A | B | C",\\
+\ \ "lieu": "interieur\_pharmacie | exterieur | espace\_controle",\\[2pt]
+\ \ "eclairage": \{\\
+\ \ \ \ "type": "LED\_neutre | LED\_chaude | neon | naturel | mixte",\\
+\ \ \ \ "lux\_mesure": 320,\\
+\ \ \ \ "stable": true,\\
+\ \ \ \ "orientation": "face | laterale | contre\_jour",\\
+\ \ \ \ "moment\_journee": "matin | midi | fin\_journee",\\
+\ \ \ \ "meteo": "ensoleille | nuageux | interieur"\\
+\ \ \},\\[2pt]
+\ \ "smartphone": \{\\
+\ \ \ \ "modele": "Samsung A13",\\
+\ \ \ \ "android\_version": "12",\\
+\ \ \ \ "build": "A135FXXU2BWA1",\\
+\ \ \ \ "app\_camera": "Open Camera",\\
+\ \ \ \ "resolution": "1920x1080",\\
+\ \ \ \ "bitrate\_estime\_Mbps": 35,\\
+\ \ \ \ "support": "trepied | tenu\_main"\\
+\ \ \},\\[2pt]
+\ \ "sujet": \{\\
+\ \ \ \ "age\_tranche": "30-40",\\
+\ \ \ \ "genre": "M | F",\\
+\ \ \ \ "phototype\_visuel": 6,\\
+\ \ \ \ "vecteur\_peau\_calcule": [0.85, 0.43, 0.30],\\
+\ \ \ \ "pathologies\_declarees": ["hypertension"],\\
+\ \ \ \ "medicaments": []\\
+\ \ \},\\[2pt]
+\ \ "scenario": \{\\
+\ \ \ \ "position": "assis | debout",\\
+\ \ \ \ "mouvement": "immobile | leger | parole",\\
+\ \ \ \ "distance\_cm": 60\\
+\ \ \},\\[2pt]
+\ \ "enregistrement\_1": \{\\
+\ \ \ \ "duree\_s": 75,\\
+\ \ \ \ "hr\_oxymetre": 72,\\
+\ \ \ \ "spo2": 98,\\
+\ \ \ \ "qualite\_signal\_ref": "bonne | moyenne | artefacts",\\
+\ \ \ \ "fichier\_video": "CIV\_001\_rec1.mp4",\\
+\ \ \ \ "fichier\_ppg": "CIV\_001\_rec1\_ppg.csv"\\
+\ \ \},\\[2pt]
+\ \ "enregistrement\_2": \{\\
+\ \ \ \ "duree\_s": 40,\\
+\ \ \ \ "bp\_systolique": 128,\\
+\ \ \ \ "bp\_diastolique": 82,\\
+\ \ \ \ "hr\_oxymetre": 75,\\
+\ \ \ \ "spo2": 98,\\
+\ \ \ \ "fichier\_video": "CIV\_001\_rec2.mp4",\\
+\ \ \ \ "fichier\_ppg": "CIV\_001\_rec2\_ppg.csv"\\
+\ \ \},\\[2pt]
+\ \ "video\_paume": null\\
+\}
+\end{codebox}
+
+\subsection{Champ \texttt{qualite\_signal\_ref}}
+
+Ce champ, particuli\`erement important pour le TYPE~C (section~3.5),
+permet de signaler si le signal de l'oxym\`etre a pr\'esent\'e des
+artefacts visibles (perte de signal, valeurs aberrantes) pendant
+l'enregistrement. Lors de l'entra\^inement, ce champ peut \^etre utilis\'e
+pour pond\'erer la confiance accord\'ee \`a chaque label, ou pour exclure
+les sessions les plus probl\'ematiques d'un sous-ensemble d'\'evaluation
+prioritaire.
+
+\newpage
+\section{Comment ces donn\'ees seront utilis\'ees pour l'entra\^inement}
+
+\subsection{Progression A $\rightarrow$ B $\rightarrow$ C}
+
+La strat\'egie d'entra\^inement suit directement la logique des trois types
+de collecte~:
+
+\begin{enumerate}
+\item \textbf{Pr\'e-entra\^inement} sur des datasets publics existants
+(UBFC, PURE) --- le mod\`ele acquiert une connaissance g\'en\'erale du
+probl\`eme rPPG.
+\item \textbf{Fine-tuning sur TYPE~A} --- les labels les plus pr\'ecis
+permettent un apprentissage fondamental propre, sp\'ecifique aux phototypes
+V--VI.
+\item \textbf{Fine-tuning sur TYPE~A~+~B} --- le mod\`ele s'adapte \`a la
+variabilit\'e d'\'eclairage r\'eelle de la pharmacie, avec un taux
+d'apprentissage r\'eduit pour ne pas perdre l'acquis de l'\'etape
+pr\'ec\'edente.
+\item \textbf{Fine-tuning final sur TYPE~A~+~B~+~C} --- dernier ajustement
+pour les conditions exactes de d\'eploiement, avec un taux d'apprentissage
+encore plus faible.
+\end{enumerate}
+
+\begin{warnbox}{Pourquoi pas un entra\^inement s\'equentiel strict
+(A puis B puis C s\'epar\'ement)}
+Un entra\^inement purement s\'equentiel --- d'abord uniquement A, puis
+uniquement B, puis uniquement C --- risque un oubli catastrophique~: le
+mod\`ele peut perdre la performance acquise sur les conditions pr\'ec\'edentes
+en s'adaptant aux nouvelles. La recommandation est de \textbf{m\'elanger}
+progressivement les ensembles (A, puis A+B, puis A+B+C) plut\^ot que de les
+remplacer.
+\end{warnbox}
+
+\subsection{R\`egle d'\'evaluation}
+
+Les donn\'ees d'\'evaluation ne doivent jamais avoir \'et\'e vues pendant
+l'entra\^inement, et l'\'evaluation finale doit porter en priorit\'e sur le
+sous-ensemble TYPE~C --- la condition la plus proche du d\'eploiement r\'eel.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{3cm} P{3cm} X}
+\toprule
+\textbf{Type} & \textbf{Split recommand\'e} & \textbf{Justification} \\
+\midrule
+TYPE A & 80\% train / 20\% test & Fondation~; un petit ensemble de test
+suffit pour v\'erifier l'absence de r\'egression \\
+TYPE B & 70\% train / 30\% test & Cœur du dataset~; \'echantillon de test
+plus large pour une mesure stable \\
+TYPE C & 60\% train / 40\% test & Cible du d\'eploiement~; la plus grande
+proportion de test pour une mesure fiable de la performance r\'eelle \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{M\'etriques \`a calculer, et pourquoi chacune}
+
+\begin{itemize}
+\item \textbf{MAE globale} --- erreur absolue moyenne en bpm, comparable
+directement aux chiffres de la litt\'erature (Dasari et al., 2021~: 5.2~bpm
+pour CHROM sur phototypes~I--III, 14.1~bpm sur~V--VI).
+\item \textbf{MAE par groupe de phototype} --- v\'erifie que
+l'am\'elioration cibl\'ee sur V--VI ne se fait pas au d\'etriment des autres
+groupes.
+\item \textbf{MAE par condition d'\'eclairage} (LED neutre, LED chaude,
+n\'eon, naturel) --- identifie si une condition particuli\`ere reste
+probl\'ematique malgr\'e le fine-tuning, ce qui orienterait une couche de
+contr\^ole qualit\'e en amont du mod\`ele plut\^ot qu'un nouvel
+entra\^inement.
+\item \textbf{MAE par niveau de mouvement} (immobile, l\'eger, parole) ---
+mesure la robustesse au sc\'enario r\'eel d'utilisation.
+\item \textbf{RMSE en compl\'ement de la MAE} --- un \'ecart important entre
+RMSE et MAE signale la pr\'esence de quelques erreurs tr\`es importantes
+(potentiellement des sessions \`a \texttt{qualite\_signal\_ref} d\'egrad\'ee,
+section~10.3) plut\^ot qu'une erreur uniform\'ement r\'epartie.
+\end{itemize}
+
+\subsection{Tableau de comparaison final attendu}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{X P{2.6cm} P{2.6cm} P{2.4cm}}
+\toprule
+\textbf{M\'ethode} & MAE peaux claires & MAE peaux fonc\'ees &
+D\'eployable smartphone \\
+\midrule
+CHROM De Haan original & $\sim$5~bpm & $\sim$14~bpm & Oui \\
+CHROM adapt\'e par phototype (section~7) & $\sim$4--5~bpm & objectif
+$<$9~bpm & Oui \\
+TS-CAN pr\'e-entra\^in\'e (sans fine-tuning) & $\sim$2~bpm & $\sim$10~bpm &
+Oui \\
+TS-CAN fine-tun\'e (A+B+C) & $\sim$2--3~bpm & objectif $<$5~bpm & Oui \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\newpage
+\section{Points de vigilance --- synth\`ese}
+
+\begin{warnbox}{R\`egle absolue}
+Ne jamais mesurer la pression art\'erielle avant ou apr\`es l'enregistrement
+vid\'eo --- uniquement pendant l'enregistrement~2 (section~9.4), pour
+\'eviter que l'inconfort du gonflage du brassard ne biaise l'\'etat de repos
+de l'enregistrement~1.
+\end{warnbox}
+
+\begin{itemize}
+\item L'oxym\`etre doit imp\'erativement \^etre plac\'e sur le bras
+\textbf{sans} le brassard de tension (section~9.2).
+\item Documenter pr\'ecis\'ement le mod\`ele et le firmware du smartphone
+pour chaque session (section~5.1) --- permet d'analyser \emph{a posteriori}
+l'impact de l'appareil sur la qualit\'e du signal.
+\item Pour le TYPE~C, privil\'egier syst\'ematiquement la lumi\`ere
+lat\'erale et \'eviter le contre-jour direct (section~6.4).
+\item V\'erifier la qualit\'e de chaque enregistrement imm\'ediatement
+apr\`es sa capture (section~5.5) --- recommencer plut\^ot que de
+d\'ecouvrir un probl\`eme en post-traitement.
+\item Maintenir l'\'eclairage entre 150 et 800~lux pour les phototypes
+V--VI, en particulier en TYPE~A et~B (section~5.4) --- en-dessous, risque de
+saturation basse~; au-dessus, risque de saturation haute.
+\item M\'elanger les TYPE~A/B/C dans le fine-tuning final plut\^ot que de
+les traiter s\'equentiellement (section~11.1), pour \'eviter l'oubli
+catastrophique.
+\item V\'erifier r\'eguli\`erement, pendant la collecte, la progression vers
+les quotas de phototype (section~4.3) --- prioriser le recrutement des
+groupes sous-repr\'esent\'es plut\^ot que de les rattraper en fin de
+collecte.
+\end{itemize}
+
+\newpage
+
+\section{Pilote recommand\'e avant d\'eploiement large}
+
+\subsection{Objectif du pilote}
+
+Avant la collecte \`a grande \'echelle, ce protocole complet doit \^etre
+test\'e sur 3 \`a 5~sujets (coll\`egues ou volontaires), en suivant
+exactement les \'etapes de la section~9, y compris la saisie compl\`ete des
+m\'etadonn\'ees (section~10).
+
+\subsection{Ce que le pilote doit permettre de v\'erifier}
+
+\begin{enumerate}
+\item \textbf{Dur\'ee r\'eelle par session} --- la cible indicative de
+10--15~minutes par sujet (accueil, installation, deux enregistrements,
+cl\^oture) doit \^etre confirm\'ee ou ajust\'ee.
+\item \textbf{D\'elai de stabilisation de l'oxym\`etre} --- typiquement
+10--15~secondes apr\`es la pose sur le doigt~; v\'erifier que ce d\'elai est
+bien int\'egr\'e avant le d\'ebut effectif de l'enregistrement~1.
+\item \textbf{Classification automatique du phototype} (section~4.5) ---
+comparer les r\'esultats de \texttt{mesurer\_vecteur\_peau} et de la
+classification par seuils \`a la classification visuelle effectu\'ee sur le
+terrain~; ajuster les seuils si n\'ecessaire.
+\item \textbf{Probl\`emes pratiques de d\'etection du visage} --- lunettes
+(reflets), occlusions partielles, angle de cam\'era~; identifier les cas qui
+posent probl\`eme \`a la d\'etection automatique avant la collecte \`a grande
+\'echelle.
+\item \textbf{Indicateur de qualit\'e en temps r\'eel} (section~5.5) ---
+v\'erifier que les seuils de saturation et de distance propos\'es
+correspondent \`a des probl\`emes r\'eellement visibles sur les vid\'eos.
+\item \textbf{Confort du protocole de synchronisation} (section~9.3) ---
+v\'erifier que le geste de pr\'esenter l'oxym\`etre face \`a la cam\'era
+pendant 3~secondes est facile \`a r\'ealiser et bien visible en
+post-traitement.
+\end{enumerate}
+
+\subsection{Ajustements attendus apr\`es le pilote}
+
+Ce document constitue la \textbf{version~1} du protocole. Les param\`etres
+suivants sont les plus susceptibles d'\^etre ajust\'es \`a la suite du
+pilote~:
+
+\begin{itemize}
+\item Dur\'ees exactes des enregistrements~1 et~2 (actuellement 60--90~s et
+30--60~s).
+\item Seuils de classification automatique du phototype (section~4.5).
+\item Seuils de l'indicateur de qualit\'e temps r\'eel (section~5.5).
+\item Liste finale des smartphones en rotation, selon leur disponibilit\'e
+r\'eelle et la qualit\'e du signal observ\'ee (section~5.1).
+\end{itemize}
+
+\newpage
+
+\section*{R\'ef\'erences}
+\addcontentsline{toc}{section}{R\'ef\'erences}
+
+\begin{itemize}
+\item De Haan, G. \& Jeanne, V. (2013). Robust pulse rate from
+chrominance-based rPPG. \emph{IEEE Transactions on Biomedical Engineering},
+60(10), 2878--2886.
+\item Dasari, A., Prakash, S. K. A., Jeni, L. A. \& Tucker, C. S. (2021).
+Evaluation of biases in remote photoplethysmography methods. \emph{npj
+Digital Medicine}, 4, 91.
+\item Mehmood, A. et al. (2025). Demographic bias in public remote
+photoplethysmography datasets. \emph{npj Digital Medicine}.
+\item Toye, P. (2023). \emph{Vital Videos: A public dataset of videos with
+PPG and BP ground truths}. Vital Videos project.
+\item Liu, X. et al. (2020). Multi-task temporal shift attention networks
+for on-device contactless vitals measurement (TS-CAN). \emph{NeurIPS}.
+\item Yu, Z. et al. (2019). RhythmNet / PhysNet : remote photoplethysmography
+via spatio-temporal networks. \emph{BMVC}.
+\end{itemize}
+
+\vspace{0.6cm}
+\noindent\rule{\textwidth}{0.4pt}
+\begin{center}
+\small Fin du document --- Protocole version 1, sujet \`a r\'evision apr\`es
+le pilote (section~13)
+\end{center}
+
+\end{document}

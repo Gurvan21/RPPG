@@ -1,0 +1,691 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{caption}
+\hypersetup{colorlinks=true, linkcolor=blue!55!black, citecolor=blue!55!black,
+            urlcolor=blue!55!black}
+
+\definecolor{good}{RGB}{20,120,40}
+\definecolor{bad}{RGB}{170,30,30}
+\newcommand{\ok}[1]{\textcolor{good}{#1}}
+\newcommand{\ko}[1]{\textcolor{bad}{#1}}
+
+\title{\textbf{Estimation de la fréquence cardiaque par rPPG\\
+robuste aux carnations foncées}\\[4pt]
+\large Comparaison de méthodes classiques et profondes, fine-tuning de PhysNet,\\
+approche par régions + CNN~1D, et pistes d'amélioration}
+\author{Projet \texttt{mp-rppg-eval}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Ce rapport synthétise nos travaux sur l'estimation sans contact de la fréquence
+cardiaque (FC) à partir d'une vidéo du visage (\emph{remote photoplethysmography},
+rPPG), avec un objectif central : la robustesse sur les \textbf{carnations foncées}
+(Fitzpatrick~4--6), là où la littérature et les solutions commerciales restent
+fragiles. Nous comparons deux familles d'approches --- les méthodes de
+\emph{démixage chromatique} (CHROM, POS) et les réseaux profonds spatio-temporels
+(PhysNet) --- et nous introduisons deux approches conçues pour la robustesse
+inter-carnation : (i)~un \textbf{CNN~1D} appliqué à des signaux multi-régions /
+multi-espaces colorimétriques extraits par segmentation faciale profonde (BiSeNet),
+et (ii)~\textbf{CHROM-ITA}, une variante de CHROM dont les coefficients de
+projection sont conditionnés par l'angle typologique individuel (ITA) de la peau.
+Nous décrivons la motivation théorique de chaque choix, le protocole expérimental
+(évaluation au \emph{niveau scénario} et politique de confiance fondée sur le
+rapport signal/bruit, SNR), les résultats obtenus sur le jeu VitalVideos
+(\texttt{DataVital}), et un ensemble de pistes à explorer --- notamment la
+\textbf{fusion par sélection SNR}, l'ajout d'un canal \textbf{ballistocardiographique}
+(BCG) indépendant de la couleur de peau, et une architecture de décision multi-signal
+inspirée de Binah.AI.
+\end{abstract}
+
+\tableofcontents
+\bigskip
+
+%======================================================================
+\section{Contexte et objectif}
+%======================================================================
+
+La photopléthysmographie à distance (rPPG) exploite les minuscules variations de
+couleur de la peau induites, à chaque battement cardiaque, par la variation du
+volume sanguin dans le lit capillaire sous-cutané~\cite{verkruysse2008,
+poh2010}. Une caméra RGB ordinaire suffit en principe à reconstruire un signal
+pulsatile et à en déduire la FC.
+
+\paragraph{Le problème des carnations foncées.}
+L'amplitude du signal rPPG est proportionnelle à la lumière \emph{rétrodiffusée}
+après avoir traversé l'épiderme. Or la mélanine, concentrée dans l'épiderme,
+absorbe fortement dans le visible (surtout aux courtes longueurs d'onde). Sur une
+peau Fitzpatrick~5--6, le rapport signal/bruit (SNR) du signal pulsatile chute
+donc mécaniquement, et toutes les méthodes optiques se dégradent~\cite{nowara2020,
+dasari2021}. C'est un enjeu d'équité : plusieurs solutions grand public
+sous-performent sur les peaux foncées. Notre objectif est de \textbf{quantifier}
+cette dégradation sur nos méthodes et de la \textbf{réduire}.
+
+\paragraph{Jeu de données.}
+Nous travaillons sur des vidéos au format \emph{VitalVideos}~\cite{toye2023}
+(dossier \texttt{DataVital}) : chaque sujet est filmé en plusieurs
+\emph{scénarios} ($\sim$20\,s, 30--60\,fps), avec une vérité-terrain PPG
+synchronisée (oxymètre de doigt) et des métadonnées (âge, sexe, \textbf{phototype
+Fitzpatrick}, environnement). VitalVideos est précisément conçu pour couvrir une
+diversité de carnations, ce qui en fait un banc d'essai pertinent. À ce jour
+$\sim$89~sujets sont prétraités et exploités pour l'entraînement~; un lot
+supplémentaire de 22~sujets jamais vus sert de test \emph{held-out}.
+
+%======================================================================
+\section{Méthodes comparées}
+%======================================================================
+
+\subsection{Démixage chromatique : CHROM et POS}
+
+Ces méthodes \emph{non supervisées} partent d'un modèle de réflectance de la peau.
+On extrait la couleur moyenne RGB d'une région de peau au cours du temps, on la
+normalise, puis on projette les trois canaux sur une direction où la pulsation est
+maximisée et l'artéfact de mouvement (variation d'intensité spéculaire) annulé.
+
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{CHROM}~\cite{dehaan2013} construit deux signaux chrominance
+$X = 3R_n - 2G_n$ et $Y = 1.5R_n + G_n - 1.5B_n$ (coefficients issus d'une
+hypothèse de teinte de peau \emph{standardisée}), puis combine
+$S = X - \alpha Y$ avec $\alpha$ égalisant les écarts-types. C'est la méthode de
+référence, robuste et rapide.
+\item \textbf{POS} (\emph{Plane-Orthogonal-to-Skin})~\cite{wang2017} définit un
+plan orthogonal à la direction moyenne de la peau dans l'espace RGB temporel et y
+projette le signal. Théoriquement mieux fondée que CHROM sur le plan du modèle de
+réflectance, souvent plus robuste au mouvement.
+\end{itemize}
+
+\noindent\textbf{Limite pour notre problème.} Les coefficients de CHROM/POS sont
+\emph{figés} et calibrés implicitement sur une teinte de peau « moyenne ». Sur une
+carnation très foncée (faible signal, spectre de réflectance déplacé), cette
+projection fixe n'est plus optimale --- c'est la motivation directe de
+CHROM-ITA (§\ref{sec:chromita}).
+
+\subsection{Réseau profond spatio-temporel : PhysNet}
+
+\textbf{PhysNet}~\cite{yu2019} est un encodeur-décodeur \emph{3D-CNN} : il prend
+en entrée un cube spatio-temporel (typiquement $128$~images $\times 72\times72$
+pixels du visage) et régresse directement la forme d'onde rPPG, image par image.
+Les convolutions 3D capturent conjointement la texture spatiale et la dynamique
+temporelle, ce qui permet en principe d'apprendre des indices que CHROM/POS
+ignorent (micro-textures, distribution spatiale de la pulsation).
+
+\paragraph{Prétraitement \emph{DiffNormalized}.} Comme dans la lignée
+DeepPhys/MTTS-CAN~\cite{chen2018,liu2020}, l'entrée est la différence normalisée
+entre images consécutives, qui accentue les variations pulsatiles et atténue
+l'éclairage statique. \emph{Revers de la médaille}~: sur une vidéo smartphone
+fortement compressée (H.264), cette différence amplifie les artéfacts de
+compression temporelle --- une limite que nous avons observée et documentée.
+
+\paragraph{Pourquoi fine-tuner.} Les poids publics de PhysNet sont entraînés sur
+des jeux à dominante de peaux claires (SCAMPS synthétique, UBFC, PURE). Un
+fine-tuning sur des données diversifiées (VitalVideos) vise à recalibrer le réseau
+pour les carnations sous-représentées.
+
+\subsection{Approche par régions + CNN 1D}
+\label{sec:cnn1d}
+
+Idée (proche de la famille \emph{MSTmap}/RhythmNet~\cite{niu2019,niu2020}) :
+plutôt qu'un 3D-CNN coûteux sur des pixels bruts, on \textbf{réduit} d'abord la
+vidéo à un petit ensemble de \emph{signaux 1D} robustes, puis on les traite par un
+réseau léger.
+
+\begin{enumerate}[leftmargin=1.4em]
+\item \textbf{Segmentation faciale profonde} par \textbf{BiSeNet}~\cite{yu2018}
+(\emph{face parsing}) : on isole précisément la peau et on découpe le visage en
+\textbf{23~régions} (7~régions anatomiques --- front, joues, nez, menton... ---
++ une grille $4\times4$).
+\item Pour chaque région et chaque image, on calcule la couleur moyenne dans
+\textbf{9~canaux} couvrant 3~espaces colorimétriques (RGB, YUV, Lab), soit
+$23\times9 = 207$~signaux temporels.
+\item Un \textbf{CNN~1D} dilaté ($\sim$113\,k~paramètres, dilatations $1,2,4,8$)
+régresse la forme d'onde rPPG à partir de ces 207~canaux.
+\end{enumerate}
+
+\noindent\textbf{Justification.} (i)~La segmentation profonde garantit qu'on
+n'agrège que des pixels de peau (vs une boîte rectangulaire qui inclut cheveux,
+fond, vêtements)~; (ii)~la \emph{redondance} multi-régions / multi-espaces donne
+au réseau des combinaisons linéaires riches pour isoler la pulsation du bruit,
+\emph{y compris} des combinaisons mieux adaptées à une carnation donnée
+--- ce qu'un CHROM à coefficients fixes ne peut pas faire~; (iii)~le modèle est
+minuscule et rapide, donc déployable. \textbf{Risque identifié}~: avec 207~canaux
+et peu de sujets, le sur-apprentissage guette (cf.~§\ref{sec:results}).
+
+\subsection{CHROM-ITA : démixage conditionné par la carnation}
+\label{sec:chromita}
+
+Pour lever la rigidité de CHROM tout en gardant son interprétabilité, nous
+conditionnons ses coefficients sur la \textbf{carnation mesurée}. L'\textbf{ITA}
+(\emph{Individual Typology Angle})~\cite{chardon1991} est un descripteur continu
+de teinte de peau dérivé de l'espace L*a*b* :
+\[
+\mathrm{ITA} = \arctan\!\Big(\frac{L^* - 50}{b^*}\Big)\cdot\frac{180}{\pi},
+\]
+positif pour les peaux claires, négatif pour les peaux foncées. Un petit MLP
+($1\!\to\!8\!\to\!5$) prend l'ITA de la région et produit les coefficients de
+projection chromatique, \textbf{initialisés sur les valeurs de De Haan} (de sorte
+que le modèle non entraîné $\equiv$ CHROM standard). On apprend ainsi une
+\emph{famille continue} de démixages indexée par la carnation.
+
+\subsection{Repères industriels : Binah.AI}
+\label{sec:binah}
+
+Binah.AI revendique une mesure multi-constantes (FC, VFC, SpO$_2$, respiration,
+stress) robuste à toutes les carnations, depuis une simple caméra. D'après leurs
+communications, leur pipeline repose sur~: (i)~le \textbf{TOI} (\emph{Transdermal
+Optical Imaging}), c.-à-d. la même famille « couleur » que CHROM/POS~; (ii)~un
+module appris de \textbf{qualité de signal (SQA)} qui \textbf{rejette} les fenêtres
+trop bruitées et ne renvoie une mesure que lorsqu'elle est jugée fiable (d'où le
+fameux « measuring\dots » qui se prolonge en conditions difficiles)~; (iii)~de
+\emph{très gros} jeux d'entraînement multi-ethniques pour calibrer la conversion
+signal~$\rightarrow$~constante vitale. \textbf{Enseignement pour nous}~: leur
+avantage n'est pas un algorithme unique « anti-mélanine », mais une
+\textbf{architecture de décision} (multi-signal + rejet par qualité). Nos briques
+SNR (§\ref{sec:snr}) vont exactement dans ce sens.
+
+%======================================================================
+\section{Protocole expérimental}
+%======================================================================
+
+\subsection{Audit du prétraitement (avant ré-entraînement)}
+
+Avant tout entraînement « propre » à grande échelle, nous avons audité la chaîne
+et corrigé trois défauts qui faussaient les résultats~:
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{Augmentation temporelle de PhysNet} : le retournement temporel de
+l'entrée n'inversait pas la cible $y$ $\Rightarrow$ paires (entrée, label)
+désalignées (corruption de label). \emph{Corrigé} : $x$ et $y$ retournés
+conjointement.
+\item \textbf{Double filtrage passe-bande} dans le pipeline CNN~1D (label déjà
+filtré à l'extraction, puis re-filtré à l'entraînement). \emph{Corrigé}.
+\item \textbf{Fréquences d'images hétérogènes} (40/60\,fps à l'entraînement,
+$\sim$30\,fps au déploiement). \emph{Corrigé} : ré-échantillonnage de toutes les
+séquences à \textbf{30\,fps} (image la plus proche) pour homogénéiser la
+dynamique temporelle apprise.
+\end{itemize}
+La détection/suivi du visage a par ailleurs été basculée de Haar Cascade vers
+\textbf{MediaPipe FaceMesh} en mode \emph{tracking} (landmarks propagés d'image en
+image), plus stable et évitant qu'une main (geste « facepalm ») soit prise pour le
+visage --- les régions de peau étant de toute façon resegmentées par BiSeNet.
+
+\subsection{Évaluation au niveau scénario (et non par fenêtre)}
+
+Une erreur méthodologique fréquente consiste à mesurer la FC sur des fenêtres
+courtes (128~images $\approx$~2\,s) et à moyenner. Sur 2\,s, la résolution
+fréquentielle de la FFT est grossière et la FC estimée est instable. Nous
+reconstruisons donc le signal \textbf{complet du scénario} ($\sim$20\,s) puis
+estimons \textbf{une} FC par FFT. Cela change radicalement les chiffres
+(p.~ex. une MAE PhysNet passant de $\sim$19,8 par fenêtre à $\sim$7--8 au niveau
+scénario) et constitue la seule comparaison équitable entre méthodes.
+
+\subsection{Politique de confiance fondée sur le SNR}
+\label{sec:snr}
+
+Plutôt que de toujours renvoyer une FC, nous calculons pour chaque estimation un
+\textbf{SNR aveugle} : énergie spectrale dans une bande étroite autour du pic FC
+estimé, rapportée à l'énergie hors-bande dans $[0{,}7,\,2{,}5]$\,Hz. Nous
+appliquons alors la politique (inspirée du SQA de Binah, §\ref{sec:binah})~:
+\[
+\boxed{~\text{SNR} > -1~\Rightarrow~\ok{VALIDÉ}\quad
+-3 \le \text{SNR} \le -1~\Rightarrow~\text{douteux}\quad
+\text{SNR} < -3~\Rightarrow~\ko{REJETÉ}~}
+\]
+Empiriquement, les échecs se concentrent vers $\sim\!-3$\,dB et les succès vers
+$\sim\!+1{,}5$\,dB : le SNR est donc un \emph{signal de confiance} exploitable.
+\emph{Réserve importante} : il n'est pas infaillible (cf. CHROM-ITA, §\ref{sec:results}).
+
+%======================================================================
+\section{Résultats}
+\label{sec:results}
+%======================================================================
+
+\subsection{Choix de la base PhysNet à fine-tuner}
+
+Nous avons évalué les \textbf{5~jeux de poids publics} (SCAMPS, UBFC, PURE,
+MA-UBFC, BP4D) sur nos données. \textbf{PURE} généralise le mieux et a été retenu
+comme base. (SCAMPS, purement synthétique, marche bien sur UBFC mais mal sur nos
+vidéos~; UBFC seul généralise encore moins.)
+
+\subsection{Stratégie de fine-tuning : geler ou non ?}
+
+Nous avons comparé quatre stratégies de gel sur la base PURE~:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Variante & Couches entraînées & Résultat \\
+\midrule
+A & \textbf{tout} le réseau (full fine-tune) & \ok{meilleure} \\
+B & gel ConvBlock4--9 + upsampling & moins bon \\
+C & B + recalibration BatchNorm & moins bon \\
+D & gel du seul goulot (ConvBlock8--9) & moins bon \\
+\bottomrule
+\end{tabular}
+\end{center}
+\textbf{Conclusion}~: le \textbf{full fine-tune (A)} domine. Le gel partiel crée
+un \emph{goulot de capacité} --- le réseau n'a pas assez de degrés de liberté pour
+se recalibrer sur la nouvelle distribution de carnations. On en retient aussi
+qu'il est normal qu'une perte par \emph{corrélation de Pearson} (négative) ne
+« tende pas vers~0 »~: elle est bornée par le bruit intrinsèque de la
+vérité-terrain~; une bonne corrélation peut coexister avec une MAE encore élevée,
+les deux mesurant des choses différentes.
+
+\subsection{Comparaison des méthodes (niveau scénario, base propre)}
+
+Sur le découpage de test (graine~42, 89~sujets, 20~scénarios de test), au niveau
+scénario, avec la politique SNR~:
+
+\begin{center}
+\captionof{table}{Comparaison globale. « Validés » = scénarios avec SNR$>-1$~;
+« MAE val. » = MAE sur ces seuls scénarios.}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Méthode & MAE (bpm) & médiane & \%\,$<5$\,bpm & Validés (SNR$>\!-1$) & MAE val. \\
+\midrule
+\textbf{CNN~1D}    & \textbf{6,77} & 0,0 & 70\,\% & --- & --- \\
+\textbf{PhysNet}   & 7,03 & 2,64 & 65\,\% & 7/20 & \ok{5,27} \\
+\textbf{POS}       & --- & --- & --- & \ok{9/20} & \ok{0,39} \\
+\textbf{CHROM-ITA} & 11,43 & --- & --- & --- & \ko{$\sim$26 (cas piégeux)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Lectures clés.}
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{Au global}, CNN~1D (6,77) et PhysNet (7,03) sont au coude-à-coude
+(chiffres du découpage interne~; les modèles appris ont depuis été ré-entraînés sur
+données propres, cf.~§\ref{sec:heldout} pour les scores held-out de référence).
+\item \textbf{Sous la politique SNR}, \textbf{POS} domine nettement : 9/20
+scénarios validés à \textbf{MAE 0,39}. Il est \emph{conservateur mais fiable}.
+\item Le SNR de \textbf{PhysNet est honnête}~: il \emph{rejette} quand il échoue
+(p.~ex. erreur de 28\,bpm $\rightarrow$ SNR $-4{,}8$ $\rightarrow$ rejeté). Ses
+7~scénarios validés sont propres (MAE 5,27).
+\item \textbf{CHROM-ITA est le seul danger}~: il peut être \emph{confiant et faux}
+(doublage d'harmonique : il verrouille sur $2\times$\,FC avec un SNR élevé).
+Le SNR seul ne suffit pas à le sécuriser $\Rightarrow$ garde anti-harmonique
+nécessaire (§\ref{sec:pistes}).
+\item Les échecs « peau foncée » sont des \textbf{cas individuels difficiles}
+(quelques sujets), pas une dégradation uniforme de toute la classe Fitzpatrick~6.
+\end{itemize}
+
+\subsection{Test sur 2 vidéos externes (carnations très foncées)}
+\label{sec:extvideo}
+
+Deux vidéos personnelles avec FC de référence mesurée par appareil externe, sur
+peaux très foncées (ITA $\le -56$). C'est un test \emph{in vivo} hors du jeu
+d'entraînement.
+
+\begin{center}
+\captionof{table}{Vidéo A --- réf.~\textbf{54\,bpm}, ITA~$\approx -56$.}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Méthode & FC estimée & erreur & SNR aveugle \\
+\midrule
+\textbf{CNN~1D}    & 51,0 & \ok{\textbf{3,0}} & \ok{$-0{,}26$} \\
+PhysNet            & 80,9 & 26,9 & $-1{,}28$ \\
+CHROM-ITA          & 64,2 & 10,2 & $-3{,}36$ \\
+CHROM              & 63,3 & 9,3  & $-3{,}50$ \\
+POS                & 96,7 & 42,7 & $-7{,}90$ \\
+\midrule
+écart-type des FC & \multicolumn{3}{c}{\textbf{15,9\,bpm} (méthodes \emph{divergentes})} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\captionof{table}{Vidéo B --- réf.~\textbf{56\,bpm}, ITA~$\approx -65$.}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Méthode & FC estimée & erreur & SNR aveugle \\
+\midrule
+\textbf{CNN~1D}    & 49,2 & 6,8 & \ok{$-0{,}47$} \\
+\textbf{POS}       & 56,2 & \ok{\textbf{0,2}} & $-2{,}20$ \\
+\textbf{CHROM}     & 56,2 & \ok{\textbf{0,2}} & $-4{,}30$ \\
+PhysNet            & 66,1 & 10,1 & $-3{,}64$ \\
+CHROM-ITA          & 80,2 & 24,2 & \ko{$-5{,}28$} \\
+\midrule
+écart-type des FC & \multicolumn{3}{c}{\textbf{10,8\,bpm} (méthodes \emph{regroupées})} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Deux régimes opposés --- et c'est l'enseignement central.}
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{Vidéo A (divergence).} Les méthodes sont éparpillées~; la moyenne
+naïve (75,6\,bpm) est polluée par les fausses. Seule la \emph{sélection par SNR}
+(CNN~1D, meilleur SNR) donne la bonne réponse (err~3).
+\item \textbf{Vidéo B (accord).} CHROM/POS retrouvent la FC \emph{exacte}
+(56,2 vs 56) mais avec un SNR \emph{faible} (signal ténu sur peau Fitz~6)~: le SNR
+\emph{sous-note} les bonnes méthodes. Ici la sélection-SNR retiendrait CNN~1D
+(err~6,8), tandis que la \textbf{médiane} des méthodes donne 56,2 (err~0,2).
+\end{itemize}
+
+\noindent\textbf{Conséquence : une fusion ADAPTATIVE.} Aucune règle fixe (moyenne
+seule, ou SNR seul) ne réussit sur les deux vidéos. Nous adoptons donc une fusion
+qui \emph{bascule selon l'accord inter-méthodes}~:
+\[
+\boxed{~\text{écart-type des FC} \le \tau~\Rightarrow~\textbf{consensus} \text{ (médiane)}
+\qquad
+\text{écart-type} > \tau~\Rightarrow~\textbf{sélection} \text{ (meilleur SNR validé)}~}
+\]
+avec $\tau \approx 12$\,bpm et une \emph{garde anti-harmonique} (on écarte un
+candidat dont la FC vaut $\approx 2\times$ la médiane des autres). Résultats de
+cette fusion adaptative~:
+
+\begin{center}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Vidéo & réf. & mode déclenché & FC fusionnée & erreur \\
+\midrule
+A & 54 & sélection ($\rightarrow$ CNN~1D) & 51,0 & \ok{\textbf{3,0}} \\
+B & 56 & consensus ($\rightarrow$ médiane) & 56,2 & \ok{\textbf{0,2}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Cette stratégie est désormais la \textbf{méthode de fusion par défaut}
+du pipeline (\texttt{mp\_rppg/fusion.py}, utilisée par \texttt{run\_on\_video.py}).
+
+\subsection{Bilan terrain : 5 vidéos externes, tout le spectre de carnations}
+\label{sec:bilanterrain}
+
+En agrégeant toutes les vidéos personnelles testées avec le pipeline corrigé
+(modèles ré-entraînés sur données propres, fusion adaptative, CNN~1D ré-inclus),
+on couvre un large spectre d'ITA, du clair ($+3$) au très foncé ($-65$). Une de ces
+vidéos (\texttt{IMG\_9008}) a été traitée en \textbf{test à l'aveugle} (réf.
+révélée \emph{après} la prédiction).
+
+\begin{center}
+\captionof{table}{Erreur de la \textbf{fusion adaptative} sur les vidéos externes.
+« mode » = branche déclenchée. ($\dagger$ = test à l'aveugle.)}
+\begin{tabular}{@{}lcccccl@{}}
+\toprule
+Vidéo & réf. (bpm) & ITA & carnation & fusion & erreur & mode \\
+\midrule
+Issa63               & 63 & $+3$  & claire       & 64,1 & \ok{1,1} & consensus \\
+IMG\_9008$^\dagger$  & 67 & $-16$ & médiane      & 69,4 & \ok{2,4} & consensus \\
+BPM54                & 54 & $-56$ & foncée       & 51,0 & \ok{3,0} & sélection \\
+BPM56                & 56 & $-65$ & très foncée  & 56,2 & \ok{0,2} & consensus \\
+VideoTest4           & 58 & $-62$ & très foncée  & 62,4 & 4,4 & consensus \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Résultat} : sur les 5~vidéos, la fusion adaptative reste
+\textbf{sous 5\,bpm d'erreur} de l'ITA~$+3$ à l'ITA~$-65$ (4~cas sous 3\,bpm, un à
+4,4), en adaptant son mode à chaque vidéo. Le test à l'aveugle confirme l'absence de
+réglage \emph{a posteriori}. \emph{Deux réserves honnêtes} :
+\begin{itemize}[leftmargin=1.4em]
+\item Sur les carnations très foncées, les SNR sont souvent négatifs (signal ténu)
+--- la justesse vient alors de l'\textbf{accord inter-méthodes} plus que du SNR, ce
+qui justifie d'utiliser \emph{deux} indices de confiance (SNR \emph{et} écart-type).
+\item Le cas le moins bon (VideoTest4, erreur 4,4) illustre une faiblesse de la
+médiane brute~: deux méthodes (CHROM-ITA, POS) surestimaient \emph{dans le même
+sens} (71 et 75\,bpm), tirant la médiane à 62,4 alors que le vrai cluster bas
+--- CNN~1D (57,1~; erreur 0,9) et PhysNet (60,6) --- était correct. Une médiane
+\textbf{pondérée par le SNR} ou un \textbf{rejet d'outlier} avant consensus
+corrigerait ce biais (piste §\ref{sec:pistes}).
+\end{itemize}
+
+\paragraph{Garde-fou vidéos 4K.} Les vidéos haute résolution (p.~ex. 2160$\times$3840)
+saturent la mémoire si toutes les images sont chargées en pleine résolution. Le
+chargeur redimensionne désormais les images à \texttt{max\_dim=720} dès la lecture
+(option \texttt{-{}-max-dim} de \texttt{run\_on\_video.py}) --- sans impact sur le
+signal rPPG, qui est temporel et non lié à la résolution spatiale.
+
+\subsection{Test \emph{held-out} sur 22 sujets jamais vus (majorité Fitz 5--6)}
+\label{sec:heldout}
+
+Test le plus exigeant~: 22~nouveaux sujets VitalVideos (54~scénarios),
+\textbf{jamais vus à l'entraînement}, à dominante de carnations foncées. Évaluation
+au niveau scénario.
+
+\begin{center}
+\captionof{table}{Held-out, niveau scénario, \textbf{après correction du bug de
+modèles périmés} (tous les modèles appris ré-entraînés sur l'extraction propre).
+« Validés » = SNR$>-1$. La colonne « périmé » rappelle le score erroné avant
+correction.}
+\begin{tabular}{@{}lccccc|c@{}}
+\toprule
+Méthode & MAE & médiane & \%\,$<5$ & Validés & MAE val. & (périmé) \\
+\midrule
+\textbf{PhysNet}   & \ok{\textbf{3,89}} & 0,00 & \ok{\textbf{83\,\%}} & 35/52 & \ok{\textbf{0,25}} & 3,89 \\
+\textbf{CNN~1D}    & \ok{\textbf{4,69}} & 0,00 & 80\,\% & 40/54 & 1,27 & \ko{26,60} \\
+CHROM-ITA          & 8,27 & 0,00 & 67\,\% & 21/54 & 4,27 & 11,82 \\
+CHROM              & 8,69 & 0,88 & 59\,\% & 17/54 & 3,52 & --- \\
+POS                & 9,90 & 0,88 & 65\,\% & 23/54 & 3,90 & --- \\
+\midrule
+Fusion adaptative  & 4,69 & 0,00 & 81\,\% & \multicolumn{2}{c}{consensus×43, sél.×11} & \ko{15,30} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{(A) Un bug de \emph{modèle périmé}, pas un défaut d'architecture
+--- correction d'une conclusion intermédiaire.} Une première lecture avait conclu
+que le CNN~1D « collapsait » (MAE 26,6, prédictions quasi-constantes, corrélation
+$-0{,}21$ avec la vraie FC) et qu'il fallait réduire sa capacité. \textbf{Le
+diagnostic réel est autre.} Les fichiers de poids du CNN~1D et de CHROM-ITA avaient
+été entraînés \emph{le matin}, sur une extraction de \texttt{region\_signals}
+\textbf{antérieure aux corrections de prétraitement} (double passe-bande sur les
+labels + fps mixtes), puis jamais ré-entraînés après la ré-extraction propre de
+midi. On évaluait donc des modèles appris sur des labels buggés. \textbf{Preuves}~:
+(i)~les dates des poids précèdent la ré-extraction~; (ii)~ré-entraîner la
+\emph{même} architecture sur les données propres redonne un modèle sain
+(CNN~1D : MAE \textbf{4,69}, corr 0,65~; CHROM-ITA : 11,82~$\rightarrow$~8,27)~;
+(iii)~une étude d'ablation des canaux (207 / 69 / 21) montre que \textbf{réduire la
+capacité n'aide pas} --- la version 207~canaux ré-entraînée propre est la meilleure
+--- donc le problème n'était pas le sur-apprentissage. \emph{Leçon de processus}~:
+toujours ré-entraîner les modèles \emph{après} une correction du prétraitement, et
+vérifier les horodatages poids~vs~données.
+
+\paragraph{(B) PhysNet domine \emph{en distribution}, le CNN~1D suit de près.} Sur
+sujets VitalVideos non vus, PhysNet généralise remarquablement (MAE \textbf{3,89}~;
+83\,\% $<5$\,bpm~; 0,25 sur les validés)~; le CNN~1D ré-entraîné est juste derrière
+(4,69~; 80\,\%). La \textbf{fusion adaptative} (4,69, désormais avec CNN~1D ré-inclus)
+égale le CNN~1D mais ne dépasse pas PhysNet seul~: en distribution, ajouter de
+l'optique plus bruitée dilue la bonne estimation profonde.
+
+\paragraph{(C) Réconciliation avec les vidéos externes.} Contradiction apparente~:
+sur les 2~vidéos smartphone (§\ref{sec:extvideo}) PhysNet était \emph{mauvais},
+ici il est \emph{excellent}. L'explication est le \textbf{décalage de domaine}~: le
+held-out est au format VitalVideos (même distribution que l'entraînement~: bon
+capteur, éclairage maîtrisé), tandis que les vidéos perso sont du smartphone H.264
+(compression temporelle), distribution sur laquelle le prétraitement DiffNormalized
+de PhysNet se dégrade. \emph{Leçon opérationnelle}~:
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{En distribution} (vidéo type VitalVideos)~: \textbf{faire confiance à
+PhysNet} (3,89\,bpm), la fusion n'aide pas.
+\item \textbf{Hors distribution} (smartphone/compressé)~: PhysNet n'est plus
+fiable~; les méthodes \emph{sans modèle} (CHROM/POS) et la \textbf{fusion
+adaptative} deviennent le filet de sécurité.
+\end{itemize}
+La fusion adaptative garde donc toute sa valeur comme \textbf{robustesse au domaine
+inconnu}, mais ne doit pas masquer que, sur sa distribution, PhysNet est le
+meilleur estimateur isolé.
+
+%======================================================================
+\section{Discussion}
+%======================================================================
+
+\paragraph{Aucune méthode unique ne suffit.} Chaque méthode a un régime de
+défaillance \emph{différent}~: POS est très précis quand il « voit » le signal
+mais se tait souvent~; CNN~1D est le plus stable y compris sur peau foncée mais
+peut sur-apprendre~; PhysNet est honnête (bon SNR) mais conservateur~; CHROM-ITA
+est risqué. Cette \textbf{complémentarité} est précisément ce qui rend une fusion
+intéressante.
+
+\paragraph{Le SNR est un bon proxy de confiance, mais pas une garantie.} Il
+sépare bien succès et échecs \emph{en moyenne}, mais le doublage d'harmonique
+(CHROM-ITA) montre qu'un signal peut être spectralement « propre » tout en
+pointant la mauvaise fréquence. D'où la nécessité de garde-fous physiologiques.
+
+\paragraph{Honnêteté statistique.} Les comparaisons entre sous-groupes
+Fitzpatrick doivent se faire à découpage de test \emph{identique} : une « MAE
+Fitz~6 = 15\,bpm » qui repose en réalité sur un unique sujet difficile n'est pas
+une preuve de biais systématique. Nous avons aussi vérifié l'\textbf{absence de
+fuite} entre train et test (GUID uniques) lorsqu'un résultat paraissait « trop
+bon ».
+
+%======================================================================
+\section{Pistes à explorer}
+\label{sec:pistes}
+%======================================================================
+
+\begin{enumerate}[leftmargin=1.5em]
+
+\item \textbf{Fusion adaptative (ADOPTÉE, cf.~§\ref{sec:extvideo}).} Désormais
+méthode par défaut~: \emph{médiane} quand les méthodes s'accordent (faible
+écart-type), \emph{sélection par SNR} quand elles divergent, avec garde
+anti-harmonique et sortie possible « mesure non fiable » si tout échoue (logique
+Binah). \emph{À faire}~: (a)~calibrer finement le seuil $\tau$ et le SNR de
+validation sur le test \emph{held-out}~; (b)~remplacer la médiane brute du mode
+consensus par une \textbf{médiane pondérée par le SNR} (ou un \textbf{rejet
+d'outlier} préalable), pour éviter qu'une paire de méthodes biaisées dans le même
+sens tire le consensus (cas VideoTest4, §\ref{sec:bilanterrain}).
+
+\item \textbf{Garde anti-harmonique.} Avant de valider une FC, vérifier qu'il
+n'existe pas un pic d'énergie comparable à FC/2 (sous-harmonique) dans la bande
+physiologique~; sinon corriger ou déclasser. Sécurise spécifiquement CHROM-ITA.
+
+\item \textbf{Canal ballistocardiographique (BCG), indépendant de la couleur de
+peau.} Le BCG~\cite{balakrishnan2013} mesure les \emph{micro-mouvements} de la
+tête dus à l'éjection systolique (recul newtonien de l'afflux carotidien). Étant
+\emph{mécanique}, il est \textbf{insensible à la mélanine} --- exactement
+complémentaire de l'optique~:
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & rPPG optique & BCG (mouvement) \\
+\midrule
+Source physique        & couleur de peau & déplacement de la tête \\
+Sensible à la mélanine & \ko{oui} & \ok{non} \\
+Sensible au mouvement volontaire & moyen & \ko{fort} \\
+Sensible à l'éclairage & \ko{oui} & \ok{non} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\emph{Mise en œuvre} (non supervisée, réutilise nos landmarks)~: suivre le
+déplacement vertical de points rigides (arête du nez, front) $\rightarrow$ ACP des
+trajectoires $\rightarrow$ composante la plus périodique dans $[0{,}7,2{,}5]$\,Hz
+$\rightarrow$ FFT $\rightarrow$ FC$_\text{BCG}$ + son propre SNR, ajoutée comme
+votant supplémentaire à la fusion. \emph{Condition}~: tête immobile et caméra
+stable (assis/trépied)~; à proscrire en vidéo smartphone tenue à la main.
+
+\item \textbf{Architecture de décision multi-signal type Binah.} Généraliser la
+politique SNR en un module de qualité appris (SQA) opérant par fenêtre, capable de
+combiner plusieurs constantes (FC, VFC, respiration) et de rejeter explicitement
+les segments douteux.
+
+\item \textbf{Plus de données diversifiées.} La principale limite du CNN~1D
+(sur-apprentissage à 207~canaux) et du fine-tuning PhysNet est la taille du jeu.
+Poursuivre l'intégration de VitalVideos / d'un sous-ensemble africain (Fitz~5--6)
+pour densifier les carnations sous-représentées. Étudier aussi une
+\textbf{réduction du nombre de canaux} (moins de régions / d'espaces) pour
+réduire le sur-apprentissage du CNN~1D.
+
+\item \textbf{Robustesse à la compression.} PhysNet (DiffNormalized) se dégrade
+sur vidéo H.264 fortement compressée~; explorer un prétraitement moins sensible
+aux artéfacts temporels, ou un entraînement augmenté par compression simulée.
+
+\end{enumerate}
+
+%======================================================================
+\section{Conclusion}
+%======================================================================
+
+Le test \emph{held-out} (§\ref{sec:heldout}) impose deux conclusions fortes.
+\textbf{(1)~En distribution, les deux modèles appris dominent}~: PhysNet fine-tuné
+(MAE \textbf{3,89}\,bpm, 83\,\% $<5$\,bpm) en tête, CNN~1D ré-entraîné juste derrière
+(4,69), sur des sujets VitalVideos jamais vus à dominante de peaux foncées --- la
+fusion adaptative les égale mais ne dépasse pas PhysNet seul.
+\textbf{(2)~Un incident de processus a été identifié et corrigé}~: deux modèles
+(CNN~1D, CHROM-ITA) avaient été livrés entraînés sur une extraction \emph{antérieure}
+aux corrections de prétraitement, faussant lourdement leur évaluation
+(CNN~1D~: 26,6 au lieu de 4,7)~; tous les modèles ont été ré-entraînés sur données
+propres. La valeur propre de la \textbf{fusion adaptative} se situe \emph{hors
+distribution} (vidéo smartphone compressée, §\ref{sec:extvideo}), où PhysNet décroche
+et où les méthodes sans modèle prennent le relais. Stratégie de déploiement
+recommandée~: \emph{PhysNet en primaire si le signal est de qualité (SNR élevé),
+fusion adaptative (CNN~1D/CHROM/POS $\pm$~futur BCG) en secours sinon}, avec rejet
+explicite quand toutes les méthodes échouent. La piste la plus prometteuse pour la
+robustesse inter-carnation reste l'ajout d'un canal \textbf{BCG}, physiquement
+indépendant de la mélanine, tout en restant \emph{honnête} sur les cas impossibles.
+
+%======================================================================
+\begin{thebibliography}{99}
+\setlength{\itemsep}{2pt}
+
+\bibitem{verkruysse2008} W.~Verkruysse, L.~O.~Svaasand, J.~S.~Nelson.
+\emph{Remote plethysmographic imaging using ambient light}. Optics Express,
+16(26):21434--21445, 2008.
+
+\bibitem{poh2010} M.-Z.~Poh, D.~J.~McDuff, R.~W.~Picard.
+\emph{Non-contact, automated cardiac pulse measurements using video imaging and
+blind source separation}. Optics Express, 18(10):10762--10774, 2010.
+
+\bibitem{dehaan2013} G.~de~Haan, V.~Jeanne.
+\emph{Robust pulse rate from chrominance-based rPPG}. IEEE Transactions on
+Biomedical Engineering, 60(10):2878--2886, 2013. (CHROM)
+
+\bibitem{wang2017} W.~Wang, A.~C.~den~Brinker, S.~Stuijk, G.~de~Haan.
+\emph{Algorithmic principles of remote PPG}. IEEE Transactions on Biomedical
+Engineering, 64(7):1479--1491, 2017. (POS)
+
+\bibitem{yu2019} Z.~Yu, X.~Li, G.~Zhao.
+\emph{Remote photoplethysmograph signal measurement from facial videos using
+spatio-temporal networks}. BMVC, 2019. (PhysNet)
+
+\bibitem{chen2018} W.~Chen, D.~McDuff.
+\emph{DeepPhys: Video-based physiological measurement using convolutional
+attention networks}. ECCV, 2018.
+
+\bibitem{liu2020} X.~Liu, J.~Fromm, S.~Patel, D.~McDuff.
+\emph{Multi-task temporal shift attention networks for on-device contactless
+vitals measurement (MTTS-CAN)}. NeurIPS, 2020.
+
+\bibitem{niu2019} X.~Niu, H.~Han, S.~Shan, X.~Chen.
+\emph{RhythmNet: End-to-end heart rate estimation from face via spatial-temporal
+representation}. IEEE Transactions on Image Processing, 2019.
+
+\bibitem{niu2020} X.~Niu, et al.
+\emph{Video-based remote physiological measurement via cross-verified feature
+disentangling (MSTmap)}. ECCV, 2020.
+
+\bibitem{yu2018} C.~Yu, J.~Wang, C.~Peng, C.~Gao, G.~Yu, N.~Sang.
+\emph{BiSeNet: Bilateral segmentation network for real-time semantic
+segmentation}. ECCV, 2018. (face parsing)
+
+\bibitem{balakrishnan2013} G.~Balakrishnan, F.~Durand, J.~Guttag.
+\emph{Detecting pulse from head motions in video}. CVPR, 2013. (BCG)
+
+\bibitem{chardon1991} A.~Chardon, I.~Cretois, C.~Hourseau.
+\emph{Skin colour typology and suntanning pathways}. International Journal of
+Cosmetic Science, 13(4):191--208, 1991. (ITA)
+
+\bibitem{nowara2020} E.~M.~Nowara, D.~McDuff, A.~Veeraraghavan.
+\emph{A meta-analysis of the impact of skin tone and gender on non-contact
+photoplethysmography measurements}. CVPR Workshops, 2020.
+
+\bibitem{dasari2021} A.~Dasari, S.~K.~A.~Prakash, L.~A.~Jeni, C.~S.~Tucker.
+\emph{Evaluation of biases in remote photoplethysmography methods}. npj Digital
+Medicine, 4:91, 2021.
+
+\bibitem{toye2023} P.~Toye. \emph{VitalVideos: A dataset of face videos with PPG
+and blood pressure ground truth}. 2023. \url{https://vitalvideos.org}
+
+\end{thebibliography}
+
+\end{document}

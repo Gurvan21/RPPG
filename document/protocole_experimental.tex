@@ -1,0 +1,450 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage[most]{tcolorbox}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=black,
+  pdftitle={Protocole experimental de collecte}}
+
+\titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{0.8em}{}
+\titlespacing{\section}{0pt}{1.3em}{0.7em}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{0.7em}{}
+\titlespacing{\subsection}{0pt}{1.0em}{0.4em}
+
+\pagestyle{fancy}\fancyhf{}
+\fancyfoot[C]{\small Protocole expérimental de collecte --- rPPG / anémie}
+\fancyfoot[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0.3pt}
+
+\setlist[itemize]{leftmargin=*,itemsep=2pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=*,itemsep=3pt,topsep=3pt}
+
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\newtcolorbox{notebox}[1]{colback=white,colframe=black,boxrule=0.6pt,arc=0pt,
+  left=8pt,right=8pt,top=5pt,bottom=5pt,title={#1},coltitle=black,
+  fonttitle=\bfseries\small,
+  attach boxed title to top left={yshift=-2mm,xshift=2mm},
+  boxed title style={colback=white,boxrule=0pt},breakable}
+\newtcolorbox{warnbox}[1]{colback=white,colframe=black,boxrule=1pt,arc=0pt,
+  left=8pt,right=8pt,top=5pt,bottom=5pt,title={#1},coltitle=black,
+  fonttitle=\bfseries\small,
+  attach boxed title to top left={yshift=-2mm,xshift=2mm},
+  boxed title style={colback=white,boxrule=0pt},breakable}
+
+\begin{document}
+
+\begin{center}
+{\LARGE\bfseries PROTOCOLE EXPÉRIMENTAL DE COLLECTE}\\[6pt]
+{\large Screening cardiovasculaire et dépistage d'anémie\\ non invasifs par smartphone}\\[4pt]
+{\normalsize Réseau de pharmacies --- Afrique subsaharienne}
+\end{center}
+
+\noindent\rule{\textwidth}{0.6pt}
+\vspace{0.2cm}
+
+% ================================================================
+\section{Objectifs et motivations}
+% ================================================================
+
+L'objectif de cette collecte est de constituer un jeu de données de référence,
+représentatif des conditions réelles de pharmacie africaine, afin d'entraîner et
+d'évaluer des modèles de mesure de signes vitaux à partir d'une simple vidéo de
+smartphone. Deux finalités complémentaires :
+
+\begin{itemize}
+\item \textbf{Mesure cardiovasculaire à distance (rPPG).} Les méthodes
+d'estimation du rythme cardiaque par caméra ont été développées presque
+exclusivement sur des populations à peau claire. Leur précision se dégrade
+fortement sur les phototypes Fitzpatrick V--VI (la mélanine absorbe le signal
+optique). Ce dataset donne une \textbf{priorité absolue aux phototypes V--VI}
+pour permettre l'adaptation des modèles à cette population mal servie.
+\item \textbf{Dépistage de l'anémie par imagerie.} L'anémie (taux d'hémoglobine
+abaissé) se traduit par une \emph{pâleur} de la conjonctive (intérieur de la
+paupière inférieure) et du lit de l'ongle. En photographiant ces zones et en
+mesurant en parallèle le taux d'hémoglobine de référence, on constitue les
+données nécessaires à un modèle estimant l'hémoglobine à partir d'une photo ---
+un outil de dépistage non invasif particulièrement utile là où l'accès au
+laboratoire est limité.
+\end{itemize}
+
+Chaque participant bénéficie en retour d'un \textbf{bilan de santé immédiat}
+(section~\ref{sec:cloture}).
+
+% ================================================================
+\section{Mesures et données collectées}
+% ================================================================
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{3.5cm} X P{4.2cm}}
+\toprule
+\textbf{Donnée} & \textbf{Description} & \textbf{Matériel} \\
+\midrule
+Vidéo du visage & Signal source rPPG (rythme cardiaque) & Smartphone, caméra avant, 60~fps \\
+PPG / HR / SpO2 & Forme d'onde du pouls + fréquence cardiaque + saturation, référence & Oxymètre de pouls (USB) \\
+Pression artérielle & Systolique / diastolique (mmHg) & Tensiomètre à brassard \\
+\textbf{Hémoglobine} & Taux d'hémoglobine de référence (g/dL) & \textbf{Hémoglobinomètre} (prélèvement capillaire) \\
+\textbf{Photos conjonctive} & Intérieur de la paupière inférieure (pâleur) & Smartphone, caméra \\
+\textbf{Photos des doigts} & Lit de l'ongle / pulpe du doigt (pâleur) & Smartphone, caméra \\
+Éclairage ambiant & Luminosité au niveau du visage (lux) & Luxmètre \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\noindent Toutes les données sont enregistrées sous un \textbf{identifiant
+anonyme} (ex.\ \texttt{CIV\_001}). Aucun nom ni coordonnée n'apparaît dans les
+fichiers.
+
+% ================================================================
+\section{Matériel}
+% ================================================================
+
+\begin{itemize}
+\item \textbf{Smartphones} (3 à 4 en rotation, modèles d'entrée de gamme
+représentatifs du marché local) --- \textbf{caméra avant (selfie)}, comme
+l'application de déploiement ; résolution et débit les plus élevés, compression
+« intelligente » désactivée, \textbf{30~fps} (cadence de l'application),
+\textbf{exposition et balance des blancs verrouillées}. L'\textbf{écran} peut servir
+de \emph{lumière d'appoint} (mode blanc).
+\item \textbf{Trépied / support smartphone} --- cadrage stable du visage (le patient
+peut aussi tenir le téléphone à distance de bras, comme en usage réel).
+\item \textbf{Anneau lumineux LED (optionnel)} --- utilisé \emph{uniquement} comme
+\textbf{bras de comparaison} « lumière uniforme », \emph{pas} comme condition
+principale : le déploiement étant une app en \textbf{lumière ambiante}, la majorité
+des prises doit être en ambiance réelle variée (voir §\ref{sec:scenarios}).
+\item \textbf{Oxymètre de pouls} (type Contec CMS50D+, USB) --- capture continue
+PPG / HR / SpO2.
+\item \textbf{Tensiomètre à brassard} (type Omron).
+\item \textbf{Hémoglobinomètre} de point d'intervention (type HemoCue, mesure
+capillaire au bout du doigt) --- fournit le taux d'hémoglobine de référence.
+\item \textbf{Luxmètre} (capteur dédié ou application calibrée) --- seuil minimal
+150~lux ; plage recommandée 200--800~lux pour les phototypes V--VI.
+\item \textbf{Ordinateur portable + logiciel de collecte (interface graphique,
+section~\ref{sec:gui})} --- pilote l'enregistrement synchronisé et la saisie des
+métadonnées.
+\end{itemize}
+
+% ================================================================
+\section{Population : priorité aux phototypes foncés}
+% ================================================================
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{3.5cm} P{2cm} P{2.2cm} X}
+\toprule
+\textbf{Phototype} & \textbf{Part} & \textbf{Sujets} & \textbf{Rôle} \\
+\midrule
+Fitzpatrick I--III & 15\% & 10--15 & Comparaison avec la littérature \\
+Fitzpatrick IV & 20\% & 15--20 & Population de transition \\
+Fitzpatrick V & 30\% & 20--25 & Priorité haute \\
+Fitzpatrick VI & 35\% & 25--30 & Priorité absolue \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\noindent Le phototype est noté visuellement sur le terrain (échelle 1--6) pour
+suivre les quotas, puis confirmé en post-traitement par un descripteur de teinte
+de peau mesuré sur les pixels (ITA / vecteur de peau).
+
+% ================================================================
+\section{Scénarios d'enregistrement (format VitalVideos)}
+\label{sec:scenarios}
+% ================================================================
+
+Le déploiement visé est une \textbf{application selfie} (caméra avant) utilisée en
+\textbf{lumière ambiante non contrôlée}. La collecte doit donc \emph{ressembler au
+déploiement} : le site principal est le \textbf{visage en selfie}, et la variable
+déterminante --- surtout sur peaux foncées --- est l'\textbf{éclairage}. Plutôt que
+de fixer une seule condition, on capture \textbf{plusieurs types de lumière} et on
+\textbf{étiquette chaque vidéo dans le JSON}. Cela permet à la fois d'entraîner un
+modèle robuste \emph{et} de \emph{stratifier} les analyses (p.\,ex. quantifier
+l'apport réel d'une lumière uniforme sur les phototypes~V--VI).
+
+\begin{center}
+\begin{tabularx}{\textwidth}{P{2.6cm} P{5.6cm} X}
+\toprule
+\textbf{Champ (JSON)} & \textbf{Valeurs} & \textbf{Rôle} \\
+\midrule
+\texttt{site} & \texttt{visage} (principal) / \texttt{paume} (secondaire) & Visage = livrable ; paume = bras d'équité / recherche \\
+\texttt{camera} & \texttt{avant} / \texttt{arriere} & \texttt{avant} = déploiement selfie \\
+\texttt{lighting} & \texttt{ambiante\_bonne} / \texttt{\_moyenne} / \texttt{\_faible} / \texttt{naturelle\_fenetre} / \texttt{uniforme} & Ambiante = \textbf{majorité} (déploiement) ; uniforme = bras de comparaison \\
+\texttt{screen\_fill} & \texttt{true} / \texttt{false} & Écran blanc en lumière d'appoint \\
+\texttt{activity} & \texttt{repos} / \texttt{apres\_effort} & Élargit la plage de FC \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{notebox}{Répartition des conditions --- « domaine = déploiement »}
+La \textbf{majorité} des prises doit être en \textbf{lumière ambiante réelle}
+(\texttt{ambiante\_bonne/moyenne/faible}, \texttt{naturelle\_fenetre}), à divers
+moments (matin/midi/soir, ensoleillé/nuageux) et en lumière \textbf{latérale}
+(éviter le contre-jour) --- c'est ce que l'app verra. La lumière \textbf{uniforme}
+(anneau) reste une \textbf{minorité}, comme bras de comparaison. \textbf{Inclure
+délibérément des prises limites/sombres} (avec la référence oxymètre) : elles
+servent à \textbf{calibrer l'abstention} (le seuil à partir duquel l'app doit dire
+« mettez-vous à la lumière » plutôt que de rendre une valeur fausse). Chaque prise
+est étiquetée par les champs ci-dessus dans le JSON.
+\end{notebox}
+
+% ================================================================
+\section{Le logiciel de collecte (interface graphique)}
+\label{sec:gui}
+% ================================================================
+
+La session est pilotée par une \textbf{interface graphique} dédiée, installée sur
+l'ordinateur portable, qui automatise et fiabilise la collecte :
+
+\begin{itemize}
+\item \textbf{Enregistrement synchronisé} : elle déclenche la capture du signal
+de l'oxymètre (PPG/HR/SpO2) et marque le début/fin de chaque enregistrement par
+un \textbf{bip sonore} capté dans la piste audio de la vidéo du smartphone, ce
+qui permet une synchronisation précise vidéo $\leftrightarrow$ signal de
+référence en post-traitement.
+\item \textbf{Affichage en temps réel} du tracé PPG, du HR et de la SpO2 ---
+permet de vérifier la qualité du signal de référence avant de valider.
+\item \textbf{Saisie du formulaire à la fin} de la session, écrivant les
+\textbf{champs d'étiquetage} de chaque vidéo dans le JSON : phototype, âge, sexe,
+\texttt{site} (visage/paume), \texttt{camera} (avant/arrière), \texttt{lighting}
+(ambiante\_bonne/moyenne/faible/naturelle\_fenetre/uniforme), \texttt{screen\_fill},
+\texttt{distance\_cm}, \texttt{activity} (repos/après-effort), \texttt{phone\_model},
+FC de référence (médiane oxymètre), pression artérielle, taux d'hémoglobine, et
+chemins des photos (conjonctive, doigts). Les champs \texttt{site}, \texttt{camera},
+\texttt{lighting} et \texttt{activity} sont des \textbf{listes déroulantes} (valeurs
+prédéfinies) pour garantir un étiquetage cohérent.
+\item \textbf{Sortie structurée} : un dossier par participant, au format JSON
+anonyme, regroupant vidéos, signal PPG, photos et métadonnées.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.66\textwidth]{figures/gui_live.png}
+\caption{Interface pendant l'enregistrement : tracé PPG en temps réel,
+fréquence cardiaque et SpO2 de référence, numéro de patient anonyme, et bouton
+de démarrage qui émet le bip de synchronisation.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.66\textwidth]{figures/gui_form.png}
+\caption{Formulaire rempli \emph{à la fin} de la session (phototype, scénario,
+éclairage en lux, pression artérielle, etc.) --- saisi après l'enregistrement
+pour ne pas perturber la mesure.}
+\end{figure}
+
+% ================================================================
+\section{Procédure détaillée, étape par étape}
+% ================================================================
+
+\subsection{Étape 1 --- Accueil et consentement}
+\begin{itemize}
+\item Présentation orale du projet (en français et en langue locale si besoin) :
+objectif, durée ($\sim$15~min), caractère anonyme et volontaire.
+\item Lecture et signature du \textbf{formulaire de consentement éclairé}
+(section~\ref{sec:consent}).
+\item Attribution d'un identifiant anonyme (ex.\ \texttt{CIV\_001}) dans
+l'interface de collecte.
+\end{itemize}
+
+\subsection{Étape 2 --- Installation}
+\begin{itemize}
+\item Sujet assis ; smartphone sur \textbf{trépied} à 50--70~cm, objectif au
+niveau des yeux ; \textbf{anneau lumineux} en conditions contrôlées, ou éclairage
+ambiant documenté au luxmètre.
+\item Oxymètre placé au doigt du \textbf{bras~A} (sans brassard).
+\item Brassard de tension sur le \textbf{bras~B}, \textbf{non gonflé} à ce stade.
+
+\begin{warnbox}{Pourquoi séparer les deux bras}
+Sur le même bras, le gonflage du brassard coupe momentanément la circulation et
+fait perdre le signal de l'oxymètre. Les deux appareils sur des bras différents
+permettent de capturer le PPG en continu pendant toute la session.
+\end{warnbox}
+
+\item Mesure du lux ambiant au niveau du visage (cible $\geq$150~lux).
+\item Notation visuelle du phototype Fitzpatrick (1--6).
+\item \textbf{Configurer la caméra} du smartphone (encadré ci-dessous).
+\item Ouverture de la session dans le \textbf{logiciel de collecte}
+(section~\ref{sec:gui}) sous l'identifiant anonyme.
+\end{itemize}
+
+\begin{notebox}{Réglages caméra (application OpenCamera) --- à faire une fois par appareil/session}
+Le signal rPPG est une variation de couleur de $\sim$0{,}1~\%~: une compression
+trop forte ou une exposition qui dérive le détruisent. \emph{Validation terrain~:
+sur une même peau foncée (ITA $\approx -55$), passer aux réglages ci-dessous a fait
+chuter le désaccord inter-méthodes de 15{,}9 à 0{,}3~bpm et l'erreur de 3{,}0 à
+0{,}2~bpm.}
+\begin{itemize}
+\item \textbf{Résolution} : \textbf{1080p} (\emph{pas} 4K --- inutile pour le rPPG,
+saturation mémoire, fichiers énormes).
+\item \textbf{Débit (bitrate)} : « Custom » $\approx$ \textbf{50~Mbps}. Contrôle~:
+un clip de 30~s doit peser \emph{plusieurs dizaines de Mo}~; $<$20~Mo = débit trop
+faible.
+\item \textbf{Cadence} : \textbf{60~fps} (ou 30 si lumière insuffisante).
+\item \textbf{Anti-banding : 50~Hz} sous lumière artificielle (secteur africain
+50~Hz) --- supprime le scintillement des lampes, qui peut se confondre avec un
+pouls.
+\item \textbf{Verrouiller l'exposition et la mise au point SUR LA PEAU} : taper sur
+la \emph{joue} pour mesurer, puis activer le cadenas (AE/AF lock). Balance des
+blancs sur une valeur \textbf{fixe} (pas « auto »).
+\item \textbf{Compensation d'exposition (EV)} : \textbf{+0{,}3 à +1{,}0} pour les
+phototypes V--VI si la peau est trop sombre (la remonter dans les tons moyens, sans
+saturer).
+\item \textbf{Désactiver} : HDR, stabilisation, réduction de bruit, « compression
+intelligente / optimisation du stockage ».
+\item \textbf{Anneau lumineux sans scintillement} (alimenté en continu / DC). Test~:
+filmer l'anneau seul à 60~fps --- aucune bande ne doit défiler.
+\end{itemize}
+\end{notebox}
+
+\subsection{Étape 3 --- Enregistrement 1 : état de repos (60--90~s)}
+\begin{itemize}
+\item Vérifier que le brassard reste \textbf{non gonflé}.
+\item Dans le logiciel, bouton \textbf{«~DÉMARRER --- enregistrement 1 (repos)~»} :
+il émet un \textbf{bip de début} et démarre la capture PPG/HR/SpO2 ; lancer en
+même temps la vidéo du visage sur le smartphone.
+\item Consigne selon le scénario en cours (section~\ref{sec:scenarios}) :
+\texttt{faceonly} immobile et silencieux ; \texttt{facemovement} /
+\texttt{handheld} mouvements naturels tolérés ; \texttt{slowbreath} /
+\texttt{quickbreath} respiration guidée (lente ou rapide).
+\item Bouton \textbf{«~FIN~»} : bip de fin. Vérifier immédiatement la qualité du
+signal et de la vidéo ; en cas de problème, recommencer avant de continuer.
+\end{itemize}
+
+\subsection{Étape 4 --- Enregistrement 2 : pression artérielle (30--60~s)}
+\begin{itemize}
+\item Bouton \textbf{«~DÉMARRER --- enregistrement 2 (pression)~»} : bip de début ;
+gonfler le brassard et lancer la mesure de pression \emph{pendant} cet
+enregistrement. La vidéo et la capture PPG/HR/SpO2 continuent.
+\begin{warnbox}{Mesurer la pression \emph{pendant} l'enregistrement}
+Le gonflage du brassard peut provoquer une légère hausse transitoire du rythme.
+Mesurer la pression pendant un enregistrement distinct (et non avant/après) garde
+la cohérence entre la vidéo et l'état physiologique qu'elle représente.
+\end{warnbox}
+\item Bouton \textbf{«~FIN~»} : bip de fin.
+\end{itemize}
+
+\begin{notebox}{Les deux enregistrements dans un seul fichier}
+Le logiciel regroupe les enregistrements~1 (repos) et~2 (pression) dans un
+\textbf{même fichier JSON au format VitalVideos} (un scénario, deux
+\emph{recordings}), la pression artérielle étant rattachée à l'enregistrement~2.
+\end{notebox}
+
+\subsection{Étape 5 --- Hémoglobine et photographies de dépistage}
+\begin{itemize}
+\item \textbf{Mesure du taux d'hémoglobine} à l'aide de l'hémoglobinomètre
+(prélèvement capillaire au bout du doigt, microcuvette à usage unique).
+\item \textbf{Photo de la conjonctive} : abaisser doucement la paupière
+inférieure et photographier la conjonctive (zone interne rosée) sous éclairage
+stable, cadrage rapproché et net.
+\item \textbf{Photo des doigts} : photographier le lit de l'ongle et la pulpe des
+doigts (main détendue, paume vers le haut), même éclairage.
+\end{itemize}
+
+\begin{notebox}{Conditions d'éclairage des photos}
+La pâleur étant une information de couleur, l'éclairage des photos de conjonctive
+et de doigts doit être le \emph{même} et documenté (idéalement sous l'anneau
+lumineux). Une photo prise sous une lumière trop chaude ou trop faible fausse
+l'évaluation de la pâleur.
+\end{notebox}
+
+\subsection{Étape 6 --- Saisie des mesures et enregistrement}
+Après les deux enregistrements, le logiciel affiche le \textbf{formulaire de fin}.
+Y reporter : phototype, position, mouvement, éclairage (lux), \textbf{pression
+artérielle}, SpO2, \textbf{taux d'hémoglobine}, et les notes ; puis valider par
+\textbf{«~ENREGISTRER~»}. Le logiciel écrit alors le fichier JSON complet (vidéos,
+signal PPG des deux enregistrements, mesures, métadonnées) et \textbf{génère
+automatiquement la fiche bilan} du participant.
+
+\subsection{Étape 7 --- Clôture et remise du bilan de santé}
+\label{sec:cloture}
+\begin{itemize}
+\item \textbf{Remise de la fiche bilan} (générée automatiquement par le logiciel,
+imprimable), récapitulant : fréquence cardiaque (bpm), saturation en oxygène
+(SpO2, \%), pression artérielle (mmHg), et taux d'hémoglobine (g/dL) avec
+indication d'éventuelle anémie.
+\item En cas de valeur anormale (hypertension, SpO2 basse, hémoglobine basse), le
+participant est invité à consulter un professionnel de santé. \emph{Ce bilan est
+informatif et ne constitue pas un diagnostic médical.}
+\item Remerciement et compensation éventuelle selon les modalités convenues avec
+la pharmacie.
+\item Vérification finale que tous les fichiers (vidéos, signal PPG, photos,
+métadonnées) sont enregistrés sous l'identifiant anonyme avant de passer au
+participant suivant.
+\end{itemize}
+
+% ================================================================
+\section{Formulaire de consentement éclairé}
+\label{sec:consent}
+% ================================================================
+
+\noindent\textit{À lire et expliquer au participant ; une copie lui est remise
+s'il le souhaite.}
+
+\vspace{0.4cm}
+\noindent\textbf{Objet de l'étude.}
+Vous êtes invité(e) à participer à une étude visant à développer des outils de
+mesure de signes vitaux (rythme cardiaque, saturation en oxygène, pression
+artérielle) et de dépistage de l'anémie (taux d'hémoglobine) à partir de vidéos
+et de photographies prises avec un smartphone. La participation dure environ
+15~minutes.
+
+\vspace{0.3cm}
+\noindent\textbf{Ce qui sera enregistré.}
+Une vidéo de votre visage, une courte vidéo de votre paume (optionnelle), des
+photographies de votre conjonctive (intérieur de la paupière) et de vos doigts,
+le signal de votre pouls et de votre oxygénation (oxymètre au doigt), votre
+pression artérielle (brassard) et votre taux d'hémoglobine (petite goutte de sang
+au bout du doigt).
+
+\vspace{0.3cm}
+\noindent\textbf{Utilisation et conservation des données.}
+\begin{itemize}
+\item Vos données seront utilisées pour \textbf{entraîner et évaluer des modèles}
+d'intelligence artificielle de mesure de signes vitaux et de dépistage.
+\item Elles seront \textbf{conservées de manière anonyme} : elles sont
+enregistrées sous un identifiant codé, sans votre nom ni vos coordonnées.
+\item Vos données anonymisées pourront être \textbf{partagées avec des
+partenaires de recherche} à des fins scientifiques.
+\end{itemize}
+
+\vspace{0.3cm}
+\noindent\textbf{Vos droits.}
+\begin{itemize}
+\item Votre participation est \textbf{entièrement volontaire}.
+\item Vous avez le \textbf{droit de vous retirer de l'étude à tout moment}, sans
+avoir à vous justifier et sans aucune conséquence.
+\item Vous avez le \textbf{droit de poser toutes les questions} concernant le
+traitement et l'utilisation de vos données, et d'obtenir une réponse claire.
+\end{itemize}
+
+\vspace{0.3cm}
+\noindent\textbf{Bénéfice direct.}
+À la fin de la session, un \textbf{bilan de santé} vous est remis (rythme
+cardiaque, oxygénation, pression artérielle, taux d'hémoglobine). Ce bilan est
+informatif et ne remplace pas un avis médical.
+
+\vspace{0.6cm}
+\noindent
+\begin{tabularx}{\textwidth}{X X}
+Identifiant anonyme : \underline{\hspace{3.5cm}} &
+Date : \underline{\hspace{3.5cm}} \\[0.9cm]
+Signature du participant : & Signature du collecteur : \\[1.0cm]
+\underline{\hspace{6cm}} & \underline{\hspace{6cm}} \\
+\end{tabularx}
+
+\vspace{0.4cm}
+\noindent\small
+\textit{En signant, je confirme avoir compris l'objet de l'étude, l'utilisation
+qui sera faite de mes données, et mes droits, et je consens librement à
+participer.}
+
+\end{document}

@@ -52,20 +52,24 @@ def train(augment, tag):
     random.seed(42); np.random.seed(42); torch.manual_seed(42)
     m = PhysNet_padding_Encoder_Decoder_MAX(frames=128).to(dev)
     m.load_state_dict(torch.load(ROOT/'weights'/'SCAMPS_PhysNet_DiffNormalized.pth', map_location=dev))
-    opt = torch.optim.Adam(m.parameters(), lr=3e-5, weight_decay=1e-4)
+    opt = torch.optim.Adam(m.parameters(), lr=1e-4, weight_decay=1e-4)
     ld = DataLoader(DS(SPLIT['train'], augment=augment), batch_size=2, shuffle=True, num_workers=4, persistent_workers=True)
-    va = DS(SPLIT['val']); ckpt = ROOT/'weights'/f'physnet_rob_{tag}.pth'
+    va = DS(SPLIT['val']); va_d = DS(SPLIT['val'], degrade=True)
+    ckpt = ROOT/'weights'/f'physnet_rob_{tag}.pth'
     best, since = 1e9, 0
     for ep in range(MAX_EP):
         m.train()
         for x, y in ld:
             loss = neg_pearson(m(x.to(dev))[0], y.to(dev))
             opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(m.parameters(), 1.0); opt.step()
-        vmae = ev(m, va); flag = ''
-        if vmae < best - 0.2:
-            best = vmae; since = 0; torch.save(m.state_dict(), ckpt); flag = ' *'
+        vc = ev(m, va); vd = ev(m, va_d)
+        # sélection du checkpoint : sur la val DÉGRADÉE pour le robuste (max robustesse),
+        # sur la val propre pour le baseline.
+        crit = vd if augment else vc; flag = ''
+        if crit < best - 0.2:
+            best = crit; since = 0; torch.save(m.state_dict(), ckpt); flag = ' *'
         else: since += 1
-        print(f"    {tag} ep {ep+1:2d}  val {vmae:5.1f}{flag}", flush=True)
+        print(f"    {tag} ep {ep+1:2d}  val_propre {vc:5.1f}  val_dégradé {vd:5.1f}{flag}", flush=True)
         if since >= PATIENCE: print(f"    -> convergé (plateau {PATIENCE} ép.)", flush=True); break
     m.load_state_dict(torch.load(ckpt, map_location=dev)); return m
 
